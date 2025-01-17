@@ -37,7 +37,7 @@ sh startdb.sh
 Run the script using the following command:
 
 ```sh
-python scraper.py -p <username> [options]
+python3 scraper.py -p <username> [options]
 ```
 
 For automated start with crontab, see scraper-starter.sh
@@ -55,21 +55,21 @@ For automated start with crontab, see scraper-starter.sh
 Scrape tweets from a user profile without downloading attachments:
 
 ```sh
-python scraper.py -p @elonmusk --attachments no
+python3 scraper.py -p @elonmusk --attachments no
 ```
 
 Scrape tweets while allowing up to 20 comments per tweet:
 
 ```sh
-python scraper.py -p @elonmusk --max-comments 20
+python3 scraper.py -p @elonmusk --max-comments 20
 ```
 
 ## Notes
 - Be careful with the scraping of large amounts of data, as this can be very heavy on the Nitter service in use here.
-- Scraping may violate X's terms of service (which you technically do not agree to).
+- Scraping may violate X's terms of service (which you technically do not agreed to).
 
 ## License
 This project is licensed under the MIT License.
 
 ## Contributions
-Pull requests and suggestions are welcome! Feel free to submit issues or feature requests. Please note that I am not a professional software developer, just a researcher trying to getting his data.
+Pull requests and suggestions are welcome! Feel free to submit issues or feature requests. Please note that I am not a professional software developer, just a researcher trying to get his data.
