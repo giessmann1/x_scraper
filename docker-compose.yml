@@ -1,0 +1,21 @@
+services:
+   db:
+      image: mongo:latest
+      container_name: xdbmongo
+      ports:
+         - 27017:27017
+      environment:
+         - MONGO_INITDB_DATABASE=xdb
+         - MONGO_INITDB_ROOT_USERNAME_FILE=/run/secrets/mongodb-user
+         - MONGO_INITDB_ROOT_PASSWORD_FILE=/run/secrets/mongodb-pass
+      secrets:
+         - mongodb-user
+         - mongodb-pass
+      volumes:
+         - ./init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+         - ./xdb-data:/data/db
+secrets:
+   mongodb-user:
+      file: ./.secrets/mongodb_user.txt
+   mongodb-pass:
+      file: ./.secrets/mongodb_pwd.txt
