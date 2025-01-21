@@ -47,6 +47,7 @@ For automated start with crontab, see scraper-starter.sh
 | Parameter         | Short | Required | Default | Description |
 |------------------|-------|----------|---------|-------------|
 | `--profile`      | `-p`  | Yes      | N/A     | The username of the profile to scrape. Can be provided with or without `@`. |
+| `--tweet`        | `-t`  | No       | N/A     | The status id of a single tweet from a user to scrape. |
 | `--max-comments` | N/A   | No       | `10`    | The maximum number of comments to scrape per tweet. |
 | `--attachments`  | N/A   | No       | `yes`   | Whether to download tweet attachments as binary files. Possible values: `yes` or `no`. |
 | `--waiting-time` | N/A   | No       | `7`     | Time period (in days) to wait before scraping a new tweet. This provides people enough time to reply. |
@@ -58,15 +59,45 @@ Scrape tweets from a user profile without downloading attachments:
 python3 scraper.py -p @elonmusk --attachments no
 ```
 
-Scrape tweets while allowing up to 20 comments per tweet:
+Scrape tweets while allowing up to 100 comments per tweet:
 
 ```sh
-python3 scraper.py -p @elonmusk --max-comments 20
+python3 scraper.py -p @elonmusk --max-comments 100
+```
+
+Scrape single tweet:
+
+```sh
+python3 scraper.py -p @elonmusk -t 1881547272556777647
 ```
 
 ## Notes
 - Be careful with the scraping of large amounts of data, as this can be very heavy on the Nitter service in use here.
 - Scraping may violate X's terms of service (which you technically do not agreed to).
+
+### Running headless on MacOS
+For me, the undetected chromedriver package did not work in headless-mode with newer version of Google Chrome. Consider downgrading to [version 112](https://google-chrome.en.uptodown.com/mac/download/99265871).
+
+You probably also need to disable Google Chrome auto-updates, which is quite hacky (credit to [Dharmesh Mansata](https://stackoverflow.com/a/64923744)):
+
+```sh
+sudo rm -rf ~/Library/Google/GoogleSoftwareUpdate/
+
+cd /Library/Google/
+sudo chown nobody:nogroup GoogleSoftwareUpdate
+sudo chmod 000 GoogleSoftwareUpdate
+
+cd ~/Library/Google/
+sudo chown nobody:nogroup GoogleSoftwareUpdate
+sudo chmod 000 GoogleSoftwareUpdate
+
+cd /Library/
+sudo chown nobody:nogroup Google
+sudo chmod 000 Google
+cd ~/Library/                                                                                                                    
+sudo chown nobody:nogroup Google
+sudo chmod 000 Google
+```
 
 ## License
 This project is licensed under the MIT License.
