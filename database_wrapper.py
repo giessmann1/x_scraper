@@ -41,8 +41,11 @@ def get_tweet_by_id(col, id):
 def get_all_tweets(col):
     return col.find({})
 
-def get_hash_of_all_tweets(col):
-    return [i["hash256"] for i in col.find({}, {"hash256": 1, "_id": 0})]
+def get_hash_of_all_tweets(col_tweets):
+    return [i["hash256"] for i in col_tweets.find({}, {"hash256": 1, "_id": 0})]
+
+def get_hash_of_all_tweet_comments(col_comments, id):
+    return [i["hash256"] for i in col_comments.find({"id": id}, {"hash256": 1, "_id": 0})]
 
 def extract_media(media_url, binary_data):
     filename = os.path.join("./", extract_last_url_element(media_url))

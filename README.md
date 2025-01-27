@@ -51,6 +51,7 @@ For automated start with crontab, see scraper-starter.sh
 | `--max-comments` | N/A   | No       | `10`    | The maximum number of comments to scrape per tweet. |
 | `--attachments`  | N/A   | No       | `yes`   | Whether to download tweet attachments as binary files. Possible values: `yes` or `no`. |
 | `--waiting-time` | N/A   | No       | `7`     | Time period (in days) to wait before scraping a new tweet. This provides people enough time to reply. |
+| `--force`        | `-f`  | No       | N/A     | Force all tweets and comments to be rescraped. |
 
 ### Example Commands
 Scrape tweets from a user profile without downloading attachments:
