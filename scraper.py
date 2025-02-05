@@ -32,6 +32,7 @@ MENTIONS_NAME = "mentions"
 ATTACHMENTS_DB = "attachments"
 COMMENTS_DB = "comments"
 TWEETS_DB = "tweets"
+TWEET_ID_NAME = "ref_tweet_id"
 ATTACHMENTS = True
 FORCE_RESCRAPE = False
 
@@ -116,7 +117,7 @@ def parse_timeline_tweet(tweet, existing_entries):
         contents[MEDIA_NAME] = [m["media_url"] for m in media]
         if ATTACHMENTS:
             database_wrapper.insert_one_tweet(
-                attachments_con, {ID_NAME: id, MEDIA_NAME: media})
+                attachments_con, {TWEET_ID_NAME: id, MEDIA_NAME: media})
         hash_value = database_wrapper.hash_object(
             contents[TEXT_NAME] + datetime_utc_str + str(media))
         if hash_value in existing_entries:
@@ -167,7 +168,7 @@ def parse_conversation_tweet(reply, existing_entries):
         contents[MEDIA_NAME] = [m["media_url"] for m in media]
         if ATTACHMENTS:
             database_wrapper.insert_one_tweet(
-                attachments_con, {ID_NAME: id, MEDIA_NAME: media})
+                attachments_con, {TWEET_ID_NAME: id, MEDIA_NAME: media})
         hash_value = database_wrapper.hash_object(
             contents[TEXT_NAME] + datetime_utc_str + str(media))
         if hash_value in existing_entries:
@@ -318,6 +319,7 @@ if __name__ == '__main__':
                             reply_body = reply.find_element(By.TAG_NAME, "div")
                             reply_scraped = parse_conversation_tweet(reply_body, conversation_existing_entries)
                             if reply_scraped == -1 or reply_scraped is None: break
+                            reply_scraped.update({TWEET_ID_NAME: tweet[ID_NAME]})
                             conversation_entries.append(reply_scraped)
                             if len(conversation_entries) >= COMMENT_LIMIT:
                                 continue_scraping = False
@@ -333,6 +335,7 @@ if __name__ == '__main__':
                             reply_body = reply.find_element(By.TAG_NAME, "div")
                             reply_scraped = parse_conversation_tweet(reply_body, conversation_existing_entries)
                             if reply_scraped == -1 or reply_scraped is None: break
+                            reply_scraped.update({TWEET_ID_NAME: tweet[ID_NAME]})
                             conversation_entries.append(reply_scraped)
                         except NoSuchElementException:
                             pass
@@ -384,6 +387,7 @@ if __name__ == '__main__':
                         reply_body = reply.find_element(By.TAG_NAME, "div")
                         reply_scraped = parse_conversation_tweet(reply_body, conversation_existing_entries)
                         if reply_scraped == -1 or reply_scraped is None: break
+                        reply_scraped.update({TWEET_ID_NAME: tweet_id})
                         conversation_entries.append(reply_scraped)
                         if len(conversation_entries) >= COMMENT_LIMIT:
                             continue_scraping = False
@@ -399,6 +403,7 @@ if __name__ == '__main__':
                         reply_body = reply.find_element(By.TAG_NAME, "div")
                         reply_scraped = parse_conversation_tweet(reply_body, conversation_existing_entries)
                         if reply_scraped == -1 or reply_scraped is None: break
+                        reply_scraped.update({TWEET_ID_NAME: tweet_id})
                         conversation_entries.append(reply_scraped)
                     except NoSuchElementException:
                         pass
