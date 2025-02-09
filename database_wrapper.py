@@ -45,7 +45,7 @@ def get_hash_of_all_tweets(col_tweets):
     return [i["hash256"] for i in col_tweets.find({}, {"hash256": 1, "_id": 0})]
 
 def get_hash_of_all_tweet_comments(col_comments, id):
-    return [i["hash256"] for i in col_comments.find({"id": id}, {"hash256": 1, "_id": 0})]
+    return [i["hash256"] for i in col_comments.find({"ref_tweet_id": id}, {"hash256": 1, "_id": 0})]
 
 def extract_media(media_url, binary_data):
     filename = os.path.join("./", extract_last_url_element(media_url))
@@ -65,6 +65,16 @@ def hash_object(obj):
     hash_object = hashlib.sha256(obj_bytes)
     hex_dig = hash_object.hexdigest()
     return hex_dig
+
+def get_comments_with_replies(col, ref_tweet_ids):
+    filtered_ids = [
+        doc["id"]
+        for doc in col.find(
+            {"replies": {"$gt": 0}, "ref_tweet_id": {"$in": ref_tweet_ids}}, 
+            {"id": 1, "_id": 0}
+        )
+    ]
+    return filtered_ids
     
 # Run the module directly to check if connection work
 if __name__ == '__main__':
