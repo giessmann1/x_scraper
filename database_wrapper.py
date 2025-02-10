@@ -4,8 +4,9 @@ import os
 import hashlib
 from urllib.parse import urlparse
 
-# Returns connection object at database level
+
 def mongo_authenticate(path):
+    """Returns connection object at database level"""
     with open(f'{path}.secrets/host.txt', 'r') as f_open:
         host = f_open.readlines()[0]
     host = urllib.parse.quote_plus(host)
@@ -29,7 +30,7 @@ def extract_last_url_element(url):
     filename = path_parts[-1]
     return filename
 
-def insert_new_tweets(col, docs):
+def insert_many_tweets(col, docs):
     col.insert_many(docs)
 
 def insert_one_tweet(col, doc):

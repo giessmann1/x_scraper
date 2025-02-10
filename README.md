@@ -44,15 +44,15 @@ For automated start with crontab, see scraper-starter.sh
 
 ### Parameters
 
-| Parameter         | Short | Required | Default | Description |
-|------------------|-------|----------|---------|-------------|
-| `--profile`      | `-p`  | Yes      | N/A     | The username of the profile to scrape. Can be provided with or without `@`. |
-| `--tweet`        | `-t`  | No       | N/A     | The status id of a single tweet from a user to scrape. |
-| `--max-comments` | N/A   | No       | `10`    | The maximum number of comments to scrape per tweet. |
-| `--attachments`  | N/A   | No       | `yes`   | Whether to download tweet attachments as binary files. Possible values: `yes` or `no`. |
-| `--waiting-time` | N/A   | No       | `7`     | Time period (in days) to wait before scraping a new tweet. This provides people enough time to reply. |
-| `--force`        | `-f`  | No       | N/A     | Force all tweets and comments to be rescraped. |
-| `--deep`         | N/A   | No       | N/A     | Scrape comments of comments. |
+| Short | Long             | Type   | Default  | Required | Description                                                |
+|-------|------------------|--------|----------|----------|------------------------------------------------------------|
+| `-p`  | `--profile`      | `str`  | —        | ✅       | Profile username to scrape.                                |
+| `-t`  | `--tweet`        | `str`  | `None`   | ❌       | ID of a single tweet to scrape.                            |
+|       | `--max-comments` | `int`  | `10`     | ❌       | Maximum number of comments per tweet.                      |
+|       | `--max-tweets`   | `int`  | `10`     | ❌       | Maximum number of tweets in profile to scrape.             |
+|       | `--attachments`  | `bool` | `"yes"`  | ❌       | Scrape attachments (`yes` or `no`).                        |
+|       | `--waiting-time` | `int`  | `7`      | ❌       | Time (in days) to wait before scraping new tweets (ignored for comments). |
+| `-f`  | `--force`        | `str`  | `"none"` | ❌       | Force rescraping: `both`, `tweets`, `comments`, or `none`. |
 
 ### Example Commands
 Scrape tweets from a user profile without downloading attachments:
@@ -61,10 +61,10 @@ Scrape tweets from a user profile without downloading attachments:
 python3 scraper.py -p @elonmusk --attachments no
 ```
 
-Scrape tweets while allowing up to 100 comments per tweet:
+Scrape tweets while allowing up to 100 tweets and 20 comments per tweet:
 
 ```sh
-python3 scraper.py -p @elonmusk --max-comments 100
+python3 scraper.py -p @elonmusk --max-tweets 100 --max-comments 20
 ```
 
 Scrape single tweet:
