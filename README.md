@@ -53,6 +53,7 @@ For automated start with crontab, see scraper-starter.sh
 |       | `--attachments`  | `bool` | `"yes"`  | ❌       | Scrape attachments (`yes` or `no`).                        |
 |       | `--waiting-time` | `int`  | `7`      | ❌       | Time (in days) to wait before scraping new tweets (ignored for comments). |
 | `-f`  | `--force`        | `str`  | `"none"` | ❌       | Force rescraping: `both`, `tweets`, `comments`, or `none`. |
+|       | `--deep`         | -      | -        | ❌       | Scrape comments of comments.                               |
 
 ### Example Commands
 Scrape tweets from a user profile without downloading attachments:
