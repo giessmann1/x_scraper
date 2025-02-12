@@ -46,14 +46,14 @@ For automated start with crontab, see scraper-starter.sh
 
 | Short | Long             | Type   | Default  | Required | Description                                                |
 |-------|------------------|--------|----------|----------|------------------------------------------------------------|
-| `-p`  | `--profile`      | `str`  | —        | ✅       | Profile username to scrape.                                |
-| `-t`  | `--tweet`        | `str`  | `None`   | ❌       | ID of a single tweet to scrape.                            |
-|       | `--max-comments` | `int`  | `10`     | ❌       | Maximum number of comments per tweet.                      |
-|       | `--max-tweets`   | `int`  | `10`     | ❌       | Maximum number of tweets in profile to scrape.             |
-|       | `--attachments`  | `bool` | `"yes"`  | ❌       | Scrape attachments (`yes` or `no`).                        |
-|       | `--waiting-time` | `int`  | `7`      | ❌       | Time (in days) to wait before scraping new tweets (ignored for comments). |
-| `-f`  | `--force`        | `str`  | `"none"` | ❌       | Force rescraping: `both`, `tweets`, `comments`, or `none`. |
-|       | `--deep`         | -      | -        | ❌       | Scrape comments of comments.                               |
+| `-p`  | `--profile`      | `str`  | —        | yes      | Profile username to scrape.                                |
+| `-t`  | `--tweet`        | `str`  | `None`   | no       | ID of a single tweet to scrape.                            |
+|       | `--max-comments` | `int`  | `10`     | no       | Maximum number of comments per tweet.                      |
+|       | `--max-tweets`   | `int`  | `10`     | no       | Maximum number of tweets in profile to scrape.             |
+|       | `--attachments`  | `bool` | `"yes"`  | no       | Scrape attachments (`yes` or `no`).                        |
+|       | `--waiting-time` | `int`  | `7`      | no       | Time (in days) to wait before scraping new tweets (ignored for comments). |
+| `-f`  | `--force`        | `str`  | `"none"` | no       | Force rescraping: `both`, `tweets`, `comments`, or `none`. |
+|       | `--deep`         | -      | -        | no       | Scrape comments of comments.                               |
 
 ### Example Commands
 Scrape tweets from a user profile without downloading attachments:
@@ -75,8 +75,8 @@ python3 scraper.py -p @elonmusk -t 1881547272556777647
 ```
 
 ## Notes
-- Be careful with the scraping of large amounts of data, as this can be very heavy on the Nitter service in use here.
-- Scraping may violate X's terms of service (which you technically do not agreed to).
+- Be careful with the scraping of large amounts of data, as this can be very heavy on the Nitter service in use.
+- Scraping may violate X's terms of service (which you technically do not agreed to). Check legislation in your country.
 
 ### Running headless on MacOS
 For me, the undetected chromedriver package did not work in headless-mode with newer version of Google Chrome. Consider downgrading to [version 112](https://google-chrome.en.uptodown.com/mac/download/99265871).

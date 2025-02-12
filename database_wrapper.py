@@ -3,9 +3,11 @@ import pymongo
 import os
 import hashlib
 from urllib.parse import urlparse
+from typing import Any, Dict, List, Optional
+import pymongo.collection
 
 
-def mongo_authenticate(path):
+def mongo_authenticate(path: str) -> pymongo.MongoClient:
     """Returns connection object at database level"""
     with open(f'{path}.secrets/host.txt', 'r') as f_open:
         host = f_open.readlines()[0]
@@ -24,40 +26,61 @@ def mongo_authenticate(path):
     )
     return client
 
-def extract_last_url_element(url):
+
+def extract_last_url_element(url: str) -> str:
+    """Extracts the last element of a URL"""
     parsed_url = urlparse(url)
     path_parts = parsed_url.path.split('/')
     filename = path_parts[-1]
     return filename
 
-def insert_many_tweets(col, docs):
+
+def insert_many_tweets(col: pymongo.collection, docs: List[Dict[str, Any]]):
+    """Insert many documents into a collection"""
     col.insert_many(docs)
 
-def insert_one_tweet(col, doc):
+
+def insert_one_tweet(col: pymongo.collection, doc: Dict[str, Any]):
+    """Insert one document into a collection"""
     col.insert_one(doc)
 
-def get_tweet_by_id(col, id):
-    return col.find_one({"id": id})
 
-def get_all_tweets(col):
+def get_tweet_by_id(col: pymongo.collection, id: str) -> Optional[Dict[str, Any]]:
+    """Get a tweet by its ID"""
+    return col.find_one({"id_str": id})
+
+
+def get_all_tweets(col: pymongo.collection) -> List[Dict[str, Any]]:
+    """Get all tweets in a collection"""
     return col.find({})
 
-def get_hash_of_all_tweets(col_tweets):
-    return [i["hash256"] for i in col_tweets.find({}, {"hash256": 1, "_id": 0})]
 
-def get_hash_of_all_tweet_comments(col_comments, id):
-    return [i["hash256"] for i in col_comments.find({"ref_tweet_id": id}, {"hash256": 1, "_id": 0})]
+def get_hash_of_all_tweets(col_tweets: pymongo.collection) -> List[str]:
+    """Get the hash of all tweets in a collection"""
+    return [i["hash256_str"] for i in col_tweets.find({}, {"hash256_str": 1, "_id": 0})]
 
-def extract_media(media_url, binary_data):
+
+def __extract_media(media_url: str, binary_data: bytes) -> None:
+    """Extract media from a from binary source"""
     filename = os.path.join("./", extract_last_url_element(media_url))
     # Write the binary data to file
     with open(filename, "wb") as file:
         file.write(binary_data)
-
     print(f"Saved image file to {filename}")
 
-# SHA-256 a given object
-def hash_object(obj):
+
+def get_attachments(attachment_col: pymongo.collection, id: str) -> None:
+    """Get all attachments from a tweet"""
+    attachments = attachment_col.find_one({"ref_tweet_id_str": id})
+    if attachments is not None:
+        for a in attachments["attachments_list"]:
+            __extract_media(a["media_url_str"], a["binary_data_bytes"])
+    else:
+        print("Tweet not found.")
+
+
+def hash_object(obj: str) -> str:
+    """Hashes an object using SHA-256"""
     if (isinstance(obj, bytes)):
         obj_bytes = obj
     else:
@@ -67,17 +90,7 @@ def hash_object(obj):
     hex_dig = hash_object.hexdigest()
     return hex_dig
 
-def get_comments_with_replies(col, ref_tweet_ids):
-    filtered_ids = [
-        doc["id"]
-        for doc in col.find(
-            {"replies": {"$gt": 0}, "ref_tweet_id": {"$in": ref_tweet_ids}}, 
-            {"id": 1, "_id": 0}
-        )
-    ]
-    return filtered_ids
-    
-# Run the module directly to check if connection work
+
 if __name__ == '__main__':
     try:
         db = mongo_authenticate('./')['xdb']
