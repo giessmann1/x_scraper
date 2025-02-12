@@ -280,11 +280,11 @@ def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescra
                     return None if len(new_tweet_ids) == 0 else new_tweet_ids
                 else:
                     driver.save_screenshot("error.png")
-                    print(f"Retrying attempt {attempt} of {MAX_ATTEMPTS}...")
+                    print(f"Retrying attempt {attempt + 1} of {MAX_ATTEMPTS}...")
                     break
             except NoSuchElementException:
                 driver.save_screenshot("error.png")
-                print(f"Retrying attempt {attempt} of {MAX_ATTEMPTS}...")
+                print(f"Retrying attempt {attempt + 2} of {MAX_ATTEMPTS}...")
                 break
 
         sleep(120 + SLEEP_INTERVAL())
