@@ -124,7 +124,10 @@ def extract_quote(soup: BeautifulSoup, attachments_con: Any, attachments: bool) 
         return None
     
     quote_contents = {}
-    quote_contents.update({f"{QUOTE_NAME}_{TEXT_NAME}": quote_raw.find("div", class_="quote-text").get_text()})
+    quote_text = quote_raw.find("div", class_="quote-text")
+    if not quote_text:
+        return None
+    quote_contents.update({f"{QUOTE_NAME}_{TEXT_NAME}": quote_text.get_text()})
 
     user_info = extract_user_info(quote_raw, "tweet-name-row")
     if user_info:
