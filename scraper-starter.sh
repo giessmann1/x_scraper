@@ -12,5 +12,5 @@ fi
 # If you use Python Virtual Environment
 source .env/bin/activate
 echo $(date +'%Y-%m-%d') >> $filename
-python3 scraper.py -p @elonmusk >> $filename
+python3 scraper.py -p @doge --max-comments 9999 --max-tweets 9999 --deep >> $filename
 deactivate
