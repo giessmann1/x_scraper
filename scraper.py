@@ -261,8 +261,9 @@ def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescra
                     tweet_data = parse_tweet(tweet_soup, existing_entries, db_collections[ATTACHMENTS_DB], is_profile, waiting_time_days, attachments)
                     
                     if tweet_data == -1:
-                        print(f"Scraped {tweet_counter} new {'tweets' if is_profile else 'comments'}.")
-                        return None if len(tweets_with_replies) == 0 else tweets_with_replies  # Stop scraping
+                        if not is_profile:
+                            print(f"Scraped {tweet_counter} new {'tweets' if is_profile else 'comments'}.")
+                            return None if len(tweets_with_replies) == 0 else tweets_with_replies  # Stop scraping
                     elif tweet_data:
                         if is_profile == False:
                             tweet_data.update({TWEET_ID_NAME: url})
