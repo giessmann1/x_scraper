@@ -55,8 +55,10 @@ def get_all_tweets(col: pymongo.collection) -> List[Dict[str, Any]]:
     return col.find({})
 
 
-def get_hash_of_all_tweets(col_tweets: pymongo.collection) -> List[str]:
+def get_hash_of_all_tweets(col_tweets: pymongo.collection, username: str = None) -> List[str]:
     """Get the hash of all tweets in a collection"""
+    if username:
+        return [i["hash256_str"] for i in col_tweets.find({"username_str": username}, {"hash256_str": 1, "_id": 0})]
     return [i["hash256_str"] for i in col_tweets.find({}, {"hash256_str": 1, "_id": 0})]
 
 

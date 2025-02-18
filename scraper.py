@@ -27,7 +27,7 @@ COMMENTS_DB = "comments"
 TWEETS_DB = "tweets"
 SLEEPER_MIN = 15
 SLEEP_INTERVAL = lambda: random.randint(2, 4)
-MAX_DEPTH = 10
+MAX_DEPTH = 20
 MAX_ATTEMPTS = 2
 
 # Field Names
@@ -207,8 +207,8 @@ def parse_tweet(soup: BeautifulSoup, existing_entries: list, attachments_con: An
 def setup_driver() -> WebDriver:
     """Initialize and return a Chrome WebDriver."""
     options = uc.ChromeOptions()
-    options.headless = True
-    return uc.Chrome(use_subprocess=True, options=options, version_main=112)
+    #options.headless = True
+    return uc.Chrome(use_subprocess=True, options=options) # version_main=112
 
 
 def setup_database() -> Dict[str, Any]:
@@ -241,7 +241,10 @@ def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescra
     elif not is_profile and force_rescrape in ["both", "comments"]:
         existing_entries = list()
     else:
-        existing_entries = get_hash_of_all_tweets(db_collections[db_key])
+        if is_profile:
+            existing_entries = get_hash_of_all_tweets(db_collections[db_key], extract_last_url_element(url))
+        else:
+            existing_entries = get_hash_of_all_tweets(db_collections[db_key])
         
     tweets_with_replies = []
     tweet_counter = 0
