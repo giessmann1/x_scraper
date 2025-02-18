@@ -50,6 +50,16 @@ def get_tweet_by_id(col: pymongo.collection, id: str) -> Optional[Dict[str, Any]
     return col.find_one({"id_str": id})
 
 
+def get_tweets_by_username(col: pymongo.collection, username: str) -> Optional[Dict[str, Any]]:
+    """Get tweets by username"""
+    return [i for i in col.find({"username_str": username})]
+
+
+def get_tweet_by_username(col: pymongo.collection, username: str) -> Optional[Dict[str, Any]]:
+    """Get tweet by username"""
+    return col.find_one({"username_str": username})
+
+
 def get_all_tweets(col: pymongo.collection) -> List[Dict[str, Any]]:
     """Get all tweets in a collection"""
     return col.find({})

@@ -17,7 +17,8 @@ from database_wrapper import (
     insert_one_tweet,
     get_hash_of_all_tweets,
     extract_last_url_element,
-    hash_object
+    hash_object,
+    get_tweet_by_username
 )
 
 # Constants
@@ -25,9 +26,10 @@ STATS_LEGEND = ["replies_int", "reposts_int", "quotes_int", "likes_int", "views_
 ATTACHMENTS_DB = "attachments"
 COMMENTS_DB = "comments"
 TWEETS_DB = "tweets"
+PROFILE_DB = "profile"
 SLEEPER_MIN = 15
 SLEEP_INTERVAL = lambda: random.randint(2, 4)
-MAX_DEPTH = 20
+MAX_DEPTH = 9999
 MAX_ATTEMPTS = 2
 
 # Field Names
@@ -40,6 +42,7 @@ IS_REPOST = "is_repost_bool"
 HASHTAG_NAME = "hashtags_list"
 MENTIONS_NAME = "mentions_list"
 TWEET_ID_NAME = "ref_tweet_id_str"
+PROFILE_TWEET_ID_NAME = "profile_tweet_id_str"
 QUOTE_NAME = "quote"
 
 
@@ -149,7 +152,7 @@ def extract_quote(soup: BeautifulSoup, attachments_con: Any, attachments: bool) 
     return quote_contents
 
 
-def parse_tweet(soup: BeautifulSoup, existing_entries: list, attachments_con: Any, is_profile_tweet: bool, waiting_time_days: int, attachments: bool) -> Optional[Union[Dict[str, Any], int]]:
+def parse_tweet(soup: BeautifulSoup, existing_entries: list, attachments_con: Any, is_profile_tweet: bool, waiting_time_days: int, attachments: bool, profile_info: dict = None) -> Optional[Union[Dict[str, Any], int]]:
     """Tweet parsing function for both timeline and conversation tweets."""
     contents = extract_tweet_metadata(soup)
     if contents is None:
@@ -175,7 +178,15 @@ def parse_tweet(soup: BeautifulSoup, existing_entries: list, attachments_con: An
         print("Tweet not old enough to be scraped, skipping.")
         return None
     
-    contents[IS_REPOST] = soup.find("div", class_="retweet-header") is not None
+    if is_profile_tweet:
+        contents[IS_REPOST] = soup.find("div", class_="retweet-header") is not None
+        if contents[IS_REPOST]:
+            # In this case the retrieved username and fullname are for the original tweet
+            contents["username_str"] = profile_info["username_str"]
+            contents["fullname_str"] = profile_info["fullname_str"]
+            contents["repost_username_str"] = user_info["username_str"]
+            contents["repost_fullname_str"] = user_info["fullname_str"]
+
     
     quote = extract_quote(soup, attachments_con, attachments)
     if quote:
@@ -204,11 +215,32 @@ def parse_tweet(soup: BeautifulSoup, existing_entries: list, attachments_con: An
     return contents
 
 
+def scrape_profile_info(soup: BeautifulSoup) -> Dict[str, str]:
+    """Scrapes profile information and stats."""
+    try:
+        fullname = soup.find("a", class_="profile-card-fullname").get_text()
+        username = soup.find("a", class_="profile-card-username").get_text().replace("@", "")
+        joindate = soup.find("div", class_="profile-joindate").find("span")["title"]
+        joindate = datetime.strptime(joindate, "%I:%M %p - %d %b %Y").isoformat()
+        tweets = us_number_to_int(soup.find("li", class_="posts").find("span", class_="profile-stat-num").get_text())
+        following = us_number_to_int(soup.find("li", class_="following").find("span", class_="profile-stat-num").get_text())
+        followers = us_number_to_int(soup.find("li", class_="followers").find("span", class_="profile-stat-num").get_text())
+        likes = us_number_to_int(soup.find("li", class_="likes").find("span", class_="profile-stat-num").get_text())
+        verified = soup.find("span", class_="verified-icon")
+        if verified:
+            verified = True
+        else:
+            verified = False
+        return({"fullname_str": fullname, "username_str": username, "joindate_utc_iso": joindate, "tweets_int": tweets, "following_int": following, "followers_int": followers, "likes_int": likes, "verified_bool": verified})
+    except NoSuchElementException:
+        return None
+
+
 def setup_driver() -> WebDriver:
     """Initialize and return a Chrome WebDriver."""
     options = uc.ChromeOptions()
-    #options.headless = True
-    return uc.Chrome(use_subprocess=True, options=options) # version_main=112
+    options.headless = True
+    return uc.Chrome(use_subprocess=True, options=options, version_main=112) # version_main=112
 
 
 def setup_database() -> Dict[str, Any]:
@@ -219,6 +251,7 @@ def setup_database() -> Dict[str, Any]:
             "attachments": db[ATTACHMENTS_DB],
             "comments": db[COMMENTS_DB],
             "tweets": db[TWEETS_DB],
+            "profile": db[PROFILE_DB],
         }
     except Exception as e:
         print("Database connection failed:", e)
@@ -229,7 +262,7 @@ def tweet_url(profile_url: str, tweet_id: str) -> str:
     return f"{profile_url}/status/{tweet_id}"
 
 
-def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescrape: str, max_items: int, is_profile: bool, waiting_time_days: int, attachments: bool, depth: int = None) -> List[str]:
+def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescrape: str, max_items: int, is_profile: bool, waiting_time_days: int, attachments: bool, depth: int = None, profile_tweet: str = None) -> List[str]:
     """Generic function to scrape tweets from a profile or a conversation thread."""
     print(f"Scraping tweet {url}...") if is_profile else print(f"Scraping comments for tweet {url}...")
 
@@ -238,11 +271,17 @@ def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescra
     # Rescraping logic
     if is_profile and force_rescrape in ["both", "tweets"]:
         existing_entries = list()
+        allow_profile_scrape = True
     elif not is_profile and force_rescrape in ["both", "comments"]:
         existing_entries = list()
     else:
         if is_profile:
             existing_entries = get_hash_of_all_tweets(db_collections[db_key], extract_last_url_element(url))
+            profile_info = get_tweet_by_username(db_collections[PROFILE_DB], extract_last_url_element(url))
+            if profile_info:
+                allow_profile_scrape = False
+            else:
+                allow_profile_scrape = True
         else:
             existing_entries = get_hash_of_all_tweets(db_collections[db_key])
         
@@ -253,15 +292,35 @@ def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescra
     for attempt in range(MAX_ATTEMPTS):  # Retry up to 3 times
         driver.get(url)
         sleep(SLEEPER_MIN + SLEEP_INTERVAL())
+
+        # Store profile info
+        if is_profile and allow_profile_scrape:
+            profile_info_src = driver.find_element(By.CLASS_NAME, "profile-card")
+            profile_info_src = BeautifulSoup(profile_info_src.get_attribute("outerHTML"), "html.parser")
+            if profile_info_src:
+                profile_info = scrape_profile_info(profile_info_src)
+                if profile_info:
+                    insert_one_tweet(db_collections[PROFILE_DB], profile_info)
+                else:
+                    print("Error scraping profile information.")
+            else:
+                print("Error scraping profile information.")
+        
+        if (max_items == 0):
+            return None
         
         while True:
             timeline = driver.find_elements(By.CLASS_NAME, tweet_class)
             
             for tweet in timeline:
+                # print(tweet_counter)
                 try:
                     tweet_body = tweet.find_element(By.TAG_NAME, "div")
                     tweet_soup = BeautifulSoup(tweet_body.get_attribute("outerHTML"), "html.parser")
-                    tweet_data = parse_tweet(tweet_soup, existing_entries, db_collections[ATTACHMENTS_DB], is_profile, waiting_time_days, attachments)
+                    if is_profile:
+                        tweet_data = parse_tweet(tweet_soup, existing_entries, db_collections[ATTACHMENTS_DB], is_profile, waiting_time_days, attachments, profile_info)
+                    else:
+                        tweet_data = parse_tweet(tweet_soup, existing_entries, db_collections[ATTACHMENTS_DB], is_profile, waiting_time_days, attachments)
                     
                     if tweet_data == -1:
                         if not is_profile:
@@ -270,6 +329,7 @@ def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescra
                     elif tweet_data:
                         if is_profile == False:
                             tweet_data.update({TWEET_ID_NAME: url})
+                            tweet_data.update({PROFILE_TWEET_ID_NAME: profile_tweet})
                             tweet_data.update({"depth_int": depth})
 
                         insert_one_tweet(db_collections[db_key], tweet_data)
@@ -312,15 +372,15 @@ def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescra
         sleep(120 + SLEEP_INTERVAL())
 
 
-def deep_scrape(driver: WebDriver, db_collections: Any, comments: List, force_rescrape: str, max_comments: int, attachments: bool, depth: int) -> None:
+def deep_scrape(driver: WebDriver, db_collections: Any, comments: List, force_rescrape: str, max_comments: int, attachments: bool, depth: int, profile_tweet: str) -> None:
     """Recursively scrape comments of comments up to MAX_DEPTH levels deep."""
     if depth >= MAX_DEPTH:
         return  
     
     for comment_url in comments:
-        nested_comments = scrape_tweets(driver, comment_url, db_collections, force_rescrape, max_comments, False, 0, attachments, depth)
+        nested_comments = scrape_tweets(driver, comment_url, db_collections, force_rescrape, max_comments, False, 0, attachments, depth, profile_tweet)
         if nested_comments:
-            deep_scrape(driver, db_collections, nested_comments, force_rescrape, max_comments, attachments, depth + 1)
+            deep_scrape(driver, db_collections, nested_comments, force_rescrape, max_comments, attachments, depth + 1, profile_tweet)
 
 
 def str_to_bool(value):
@@ -366,21 +426,22 @@ def main() -> None:
     if args.tweet:
         scrape_tweets(driver, tweet_url(profile_url, args.tweet), db_collections, args.force, 1, True, 0, args.attachments)
         if args.max_comments > 0:
-            comments_scraped = scrape_tweets(driver, tweet_url(profile_url, args.tweet), db_collections, args.force, args.max_comments, False, 0, args.attachments, 1)
+            comments_scraped = scrape_tweets(driver, tweet_url(profile_url, args.tweet), db_collections, args.force, args.max_comments, False, 0, args.attachments, 1, tweet_url(profile_url, args.tweet))
             if comments_scraped and args.deep:
                 print("Start deep scraping...")
-                deep_scrape(driver, db_collections, comments_scraped, args.force, args.max_comments, args.attachments, 2)
+                deep_scrape(driver, db_collections, comments_scraped, args.force, args.max_comments, args.attachments, 2, tweet_url(profile_url, args.tweet))
     else:
         new_tweets = scrape_tweets(driver, profile_url, db_collections, args.force, args.max_tweets, True, args.waiting_time, args.attachments)
         if new_tweets and args.max_comments > 0:
-            for comment_id in new_tweets:
-                comments_scraped = scrape_tweets(driver, tweet_url(profile_url, comment_id), db_collections, args.force, args.max_comments, False, args.waiting_time, args.attachments, 1)
+            for tweet_id in new_tweets:
+                comments_scraped = scrape_tweets(driver, tweet_url(profile_url, tweet_id), db_collections, args.force, args.max_comments, False, args.waiting_time, args.attachments, 1, tweet_url(profile_url, tweet_id))
                 if comments_scraped and args.deep:
                     print("Start deep scraping...")
-                    deep_scrape(driver, db_collections, comments_scraped, args.force, args.max_comments, args.attachments, 2)
+                    deep_scrape(driver, db_collections, comments_scraped, args.force, args.max_comments, args.attachments, 2, tweet_url(profile_url, tweet_id))
     
     print("Scraping completed.")
     driver.quit()
+
 
 if __name__ == '__main__':
     main()
