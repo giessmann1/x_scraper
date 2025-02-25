@@ -3,7 +3,6 @@ from selenium.webdriver.common.by import By
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 import requests
-import bson
 import re
 from typing import Any, Dict, List, Optional, Union
 import argparse
@@ -11,7 +10,7 @@ import random
 from time import sleep
 from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.chrome.webdriver import WebDriver
-from pymongo.errors import DocumentTooLarge
+from pymongo.errors import DocumentTooLarge, WriteError
 from database_wrapper import (
     mongo_authenticate,
     insert_one_tweet,
@@ -27,10 +26,10 @@ ATTACHMENTS_DB = "attachments"
 COMMENTS_DB = "comments"
 TWEETS_DB = "tweets"
 PROFILE_DB = "profile"
-SLEEPER_MIN = 15
+SLEEPER_MIN = 10
 SLEEP_INTERVAL = lambda: random.randint(2, 4)
 MAX_DEPTH = 9999
-MAX_ATTEMPTS = 2
+MAX_ATTEMPTS = 3
 
 # Field Names
 ID_NAME = "tweet_id_str"
@@ -145,7 +144,7 @@ def extract_quote(soup: BeautifulSoup, attachments_con: Any, attachments: bool) 
         quote_contents[f"{QUOTE_NAME}_{MEDIA_NAME}"] = [m["media_url_str"] for m in media]
         try:
             insert_one_tweet(attachments_con, {TWEET_ID_NAME: quote_contents[f"{QUOTE_NAME}_{ID_NAME}"], MEDIA_NAME: media, f"{QUOTE_NAME}_bool": True})
-        except DocumentTooLarge:
+        except (DocumentTooLarge, WriteError):
             insert_one_tweet(attachments_con, {TWEET_ID_NAME: quote_contents[f"{QUOTE_NAME}_{ID_NAME}"], MEDIA_NAME: "Too large to store in database.", f"{QUOTE_NAME}_bool": True})
             print("Media too large to store in database, skipping.")
     
@@ -168,7 +167,7 @@ def parse_tweet(soup: BeautifulSoup, existing_entries: list, attachments_con: An
         return None
     contents.update(user_info)
     
-    tweet_hash = hash_object(contents[TEXT_NAME] + contents[DATETIME_NAME])
+    tweet_hash = hash_object(contents[TEXT_NAME] + contents[DATETIME_NAME] + contents["username_str"])
     if tweet_hash in existing_entries:
         print("Tweet already scraped.")
         return -1
@@ -202,14 +201,14 @@ def parse_tweet(soup: BeautifulSoup, existing_entries: list, attachments_con: An
                     contents[MEDIA_NAME] = remaining_attachments
                     try:
                         insert_one_tweet(attachments_con, {TWEET_ID_NAME: contents[ID_NAME], MEDIA_NAME: [m for m in media if m["media_url_str"] in remaining_attachments]})
-                    except DocumentTooLarge:
+                    except (DocumentTooLarge, WriteError):
                         insert_one_tweet(attachments_con, {TWEET_ID_NAME: contents[ID_NAME], MEDIA_NAME: "Too large to store in database."})
                         print("Media too large to store in database, skipping.")
             else:
                 contents[MEDIA_NAME] = media_list
                 try:
                     insert_one_tweet(attachments_con, {TWEET_ID_NAME: contents[ID_NAME], MEDIA_NAME: media})
-                except DocumentTooLarge:
+                except (DocumentTooLarge, WriteError):
                     insert_one_tweet(attachments_con, {TWEET_ID_NAME: contents[ID_NAME], MEDIA_NAME: "Too large to store in database."})
                     print("Media too large to store in database, skipping.")
     return contents
@@ -218,6 +217,7 @@ def parse_tweet(soup: BeautifulSoup, existing_entries: list, attachments_con: An
 def scrape_profile_info(soup: BeautifulSoup) -> Dict[str, str]:
     """Scrapes profile information and stats."""
     try:
+        # Bad if those don't exist
         fullname = soup.find("a", class_="profile-card-fullname").get_text()
         username = soup.find("a", class_="profile-card-username").get_text().replace("@", "")
         joindate = soup.find("div", class_="profile-joindate").find("span")["title"]
@@ -231,7 +231,27 @@ def scrape_profile_info(soup: BeautifulSoup) -> Dict[str, str]:
             verified = True
         else:
             verified = False
-        return({"fullname_str": fullname, "username_str": username, "joindate_utc_iso": joindate, "tweets_int": tweets, "following_int": following, "followers_int": followers, "likes_int": likes, "verified_bool": verified})
+
+        # Optional fields
+        profile_bio = soup.find("div", class_="profile-bio")
+        if profile_bio:
+            profile_bio = profile_bio.get_text().strip()
+        else:
+            profile_bio = None
+
+        profile_location = soup.find("div", class_="profile-location")
+        if profile_location:
+            profile_location = profile_location.get_text().strip()
+        else:
+            profile_location = None
+
+        profile_website = soup.find("div", class_="profile-website")
+        if profile_website:
+            profile_website = profile_website.find("a")["href"]
+        else:
+            profile_website = None
+
+        return({"fullname_str": fullname, "username_str": username, "joindate_utc_iso": joindate, "tweets_int": tweets, "following_int": following, "followers_int": followers, "likes_int": likes, "verified_bool": verified, "bio_str": profile_bio, "location_str": profile_location, "website_str": profile_website})
     except NoSuchElementException:
         return None
 
@@ -289,31 +309,65 @@ def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescra
     tweet_counter = 0
     tweet_class = "timeline-item" if is_profile else "reply"
 
-    for attempt in range(MAX_ATTEMPTS):  # Retry up to 3 times
-        driver.get(url)
-        sleep(SLEEPER_MIN + SLEEP_INTERVAL())
+    for attempt in range(MAX_ATTEMPTS):
+
+        # Handle error pages
+        try:
+            driver.get(url)
+            sleep(SLEEPER_MIN + SLEEP_INTERVAL())
+            if "429 Too Many Requests" in driver.page_source:
+                print("Rate limit reached.")
+                driver.save_screenshot("error.png")
+                print(f"Retrying attempt {attempt + 1} of {MAX_ATTEMPTS}...")
+                sleep(120 + SLEEP_INTERVAL())
+                break # Next attempt
+            else:
+                error_panel = driver.find_elements(By.CLASS_NAME, "error-panel")
+                if error_panel:
+                    error_panel_soup = BeautifulSoup(error_panel.get_attribute("outerHTML"), "html.parser")
+                    error_text = error_panel_soup.get_text()
+                    if error_text == "Page not found":
+                        print("Page not found.")
+                        return None
+                    else:
+                        print(f"Error: {error_text}")
+                        # TODO: Further analysis of error pages (e.g. account restricted)
+                        return None
+                # else continue as usual
+        except Exception as e:
+            # Handle other errors (e.g., network issues)
+            print(f"Error: {e}")
+            driver.save_screenshot("error.png")
+            return None
 
         # Store profile info
         if is_profile and allow_profile_scrape:
-            profile_info_src = driver.find_element(By.CLASS_NAME, "profile-card")
-            profile_info_src = BeautifulSoup(profile_info_src.get_attribute("outerHTML"), "html.parser")
+            profile_info_src = driver.find_elements(By.CLASS_NAME, "profile-card")
             if profile_info_src:
-                profile_info = scrape_profile_info(profile_info_src)
+                profile_info_src_soup = BeautifulSoup(profile_info_src.get_attribute("outerHTML"), "html.parser")
+                profile_info = scrape_profile_info(profile_info_src_soup)
                 if profile_info:
                     insert_one_tweet(db_collections[PROFILE_DB], profile_info)
                 else:
                     print("Error scraping profile information.")
+                    driver.save_screenshot("error.png")
+                    return None
             else:
                 print("Error scraping profile information.")
+                driver.save_screenshot("error.png")
+                return None
         
         if (max_items == 0):
             return None
         
         while True:
             timeline = driver.find_elements(By.CLASS_NAME, tweet_class)
+
+            if not timeline:
+                print("No tweets found.")
+                return None
             
             for tweet in timeline:
-                # print(tweet_counter)
                 try:
                     tweet_body = tweet.find_element(By.TAG_NAME, "div")
                     tweet_soup = BeautifulSoup(tweet_body.get_attribute("outerHTML"), "html.parser")
@@ -361,15 +415,20 @@ def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescra
                     print(f"Scraped {tweet_counter} new {'tweets' if is_profile else 'comments'}.")
                     return None if len(tweets_with_replies) == 0 else tweets_with_replies
                 else:
+                    print("No pagination (load more, no more items, or icon down) found.")
                     driver.save_screenshot("error.png")
                     print(f"Retrying attempt {attempt + 1} of {MAX_ATTEMPTS}...")
+                    sleep(120 + SLEEP_INTERVAL())
                     break
             except NoSuchElementException:
+                print("No pagination (load more, no more items, or icon down) found.")
                 driver.save_screenshot("error.png")
                 print(f"Retrying attempt {attempt + 1} of {MAX_ATTEMPTS}...")
+                sleep(120 + SLEEP_INTERVAL())
                 break
-
-        sleep(120 + SLEEP_INTERVAL())
+    
+    print(f"Scraping failed after {MAX_ATTEMPTS} attempts.")
+    driver.save_screenshot("error.png")
 
 
 def deep_scrape(driver: WebDriver, db_collections: Any, comments: List, force_rescrape: str, max_comments: int, attachments: bool, depth: int, profile_tweet: str) -> None:
@@ -424,8 +483,8 @@ def main() -> None:
     profile_url = f"https://xcancel.com/{args.profile}"
     
     if args.tweet:
-        scrape_tweets(driver, tweet_url(profile_url, args.tweet), db_collections, args.force, 1, True, 0, args.attachments)
-        if args.max_comments > 0:
+        tweet = scrape_tweets(driver, tweet_url(profile_url, args.tweet), db_collections, args.force, 1, True, 0, args.attachments)
+        if tweet and args.max_comments > 0:
             comments_scraped = scrape_tweets(driver, tweet_url(profile_url, args.tweet), db_collections, args.force, args.max_comments, False, 0, args.attachments, 1, tweet_url(profile_url, args.tweet))
             if comments_scraped and args.deep:
                 print("Start deep scraping...")
