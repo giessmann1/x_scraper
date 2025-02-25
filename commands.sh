@@ -1,8 +1,3 @@
-python3 scraper.py -p @GoldenMario13 --max-tweets 100 --max-comments 0 --waiting-time 0
-python3 scraper.py -p @KimoSab21377628 --max-tweets 100 --max-comments 0 --waiting-time 0
-python3 scraper.py -p @catcat326 --max-tweets 100 --max-comments 0 --waiting-time 0
-python3 scraper.py -p @gargledfarquad --max-tweets 100 --max-comments 0 --waiting-time 0
-python3 scraper.py -p @TobyandTina --max-tweets 100 --max-comments 0 --waiting-time 0
 python3 scraper.py -p @skunksforever --max-tweets 100 --max-comments 0 --waiting-time 0
 python3 scraper.py -p @fladolphin16 --max-tweets 100 --max-comments 0 --waiting-time 0
 python3 scraper.py -p @kaycepage5434 --max-tweets 100 --max-comments 0 --waiting-time 0

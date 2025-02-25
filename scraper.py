@@ -317,10 +317,9 @@ def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescra
             sleep(SLEEPER_MIN + SLEEP_INTERVAL())
             if "429 Too Many Requests" in driver.page_source:
                 print("Rate limit reached.")
-                driver.save_screenshot("error.png")
                 print(f"Retrying attempt {attempt + 1} of {MAX_ATTEMPTS}...")
                 sleep(120 + SLEEP_INTERVAL())
-                break # Next attempt
+                continue # Next attempt
             else:
                 error_panel = driver.find_elements(By.CLASS_NAME, "error-panel")
                 if error_panel:
@@ -344,7 +343,7 @@ def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescra
         if is_profile and allow_profile_scrape:
             profile_info_src = driver.find_elements(By.CLASS_NAME, "profile-card")
             if profile_info_src:
-                profile_info_src_soup = BeautifulSoup(profile_info_src.get_attribute("outerHTML"), "html.parser")
+                profile_info_src_soup = BeautifulSoup(profile_info_src[0].get_attribute("outerHTML"), "html.parser")
                 profile_info = scrape_profile_info(profile_info_src_soup)
                 if profile_info:
                     insert_one_tweet(db_collections[PROFILE_DB], profile_info)
@@ -419,13 +418,13 @@ def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescra
                     driver.save_screenshot("error.png")
                     print(f"Retrying attempt {attempt + 1} of {MAX_ATTEMPTS}...")
                     sleep(120 + SLEEP_INTERVAL())
-                    break
+                    continue
             except NoSuchElementException:
                 print("No pagination (load more, no more items, or icon down) found.")
                 driver.save_screenshot("error.png")
                 print(f"Retrying attempt {attempt + 1} of {MAX_ATTEMPTS}...")
                 sleep(120 + SLEEP_INTERVAL())
-                break
+                continue
     
     print(f"Scraping failed after {MAX_ATTEMPTS} attempts.")
     driver.save_screenshot("error.png")
