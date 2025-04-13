@@ -259,8 +259,8 @@ def scrape_profile_info(soup: BeautifulSoup) -> Dict[str, str]:
 def setup_driver() -> WebDriver:
     """Initialize and return a Chrome WebDriver."""
     options = uc.ChromeOptions()
-    options.headless = True
-    return uc.Chrome(use_subprocess=True, options=options, version_main=112) # version_main=112
+    #options.headless = True
+    return uc.Chrome(use_subprocess=True, options=options) # version_main=112
 
 
 def setup_database() -> Dict[str, Any]:
@@ -341,30 +341,22 @@ def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescra
 
         # Store profile info
         if is_profile and allow_profile_scrape:
-            profile_info_src = driver.find_elements(By.CLASS_NAME, "profile-card")
+            profile_info_src = driver.find_element(By.CLASS_NAME, "profile-card")
+            profile_info_src = BeautifulSoup(profile_info_src.get_attribute("outerHTML"), "html.parser")
             if profile_info_src:
-                profile_info_src_soup = BeautifulSoup(profile_info_src[0].get_attribute("outerHTML"), "html.parser")
-                profile_info = scrape_profile_info(profile_info_src_soup)
+                profile_info = scrape_profile_info(profile_info_src)
                 if profile_info:
                     insert_one_tweet(db_collections[PROFILE_DB], profile_info)
                 else:
                     print("Error scraping profile information.")
-                    driver.save_screenshot("error.png")
-                    return None
             else:
                 print("Error scraping profile information.")
-                driver.save_screenshot("error.png")
-                return None
         
         if (max_items == 0):
             return None
         
         while True:
             timeline = driver.find_elements(By.CLASS_NAME, tweet_class)
-
-            if not timeline:
-                print("No tweets found.")
-                return None
             
             for tweet in timeline:
                 try:
@@ -374,7 +366,7 @@ def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescra
                         tweet_data = parse_tweet(tweet_soup, existing_entries, db_collections[ATTACHMENTS_DB], is_profile, waiting_time_days, attachments, profile_info)
                     else:
                         tweet_data = parse_tweet(tweet_soup, existing_entries, db_collections[ATTACHMENTS_DB], is_profile, waiting_time_days, attachments)
-                    
+
                     if tweet_data == -1:
                         if not is_profile:
                             print(f"Scraped {tweet_counter} new {'tweets' if is_profile else 'comments'}.")
@@ -399,7 +391,7 @@ def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescra
                         print(f"Scraped {tweet_counter} new {'tweets' if is_profile else 'comments'}.")
                         return tweets_with_replies  # Stop if max tweets reached
                 except NoSuchElementException:
-                    continue  # Ignore non-tweet elements
+                    pass  # Ignore non-tweet elements
             
             # Handle pagination
             try:
@@ -482,8 +474,8 @@ def main() -> None:
     profile_url = f"https://xcancel.com/{args.profile}"
     
     if args.tweet:
-        tweet = scrape_tweets(driver, tweet_url(profile_url, args.tweet), db_collections, args.force, 1, True, 0, args.attachments)
-        if tweet and args.max_comments > 0:
+        scrape_tweets(driver, tweet_url(profile_url, args.tweet), db_collections, args.force, 1, True, 0, args.attachments)
+        if args.max_comments > 0:
             comments_scraped = scrape_tweets(driver, tweet_url(profile_url, args.tweet), db_collections, args.force, args.max_comments, False, 0, args.attachments, 1, tweet_url(profile_url, args.tweet))
             if comments_scraped and args.deep:
                 print("Start deep scraping...")
