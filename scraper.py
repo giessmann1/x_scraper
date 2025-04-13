@@ -341,23 +341,29 @@ def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescra
 
         # Store profile info
         if is_profile and allow_profile_scrape:
-            profile_info_src = driver.find_element(By.CLASS_NAME, "profile-card")
-            profile_info_src = BeautifulSoup(profile_info_src.get_attribute("outerHTML"), "html.parser")
-            if profile_info_src:
-                profile_info = scrape_profile_info(profile_info_src)
-                if profile_info:
-                    insert_one_tweet(db_collections[PROFILE_DB], profile_info)
+            try:
+                profile_info_src = driver.find_element(By.CLASS_NAME, "profile-card")
+                profile_info_src = BeautifulSoup(profile_info_src.get_attribute("outerHTML"), "html.parser")
+                if profile_info_src:
+                    profile_info = scrape_profile_info(profile_info_src)
+                    if profile_info:
+                        insert_one_tweet(db_collections[PROFILE_DB], profile_info)
+                    else:
+                        profile_info = None
+                        print("Error scraping profile information.")
                 else:
+                    profile_info = None
                     print("Error scraping profile information.")
-            else:
-                print("Error scraping profile information.")
+            except NoSuchElementException:
+                profile_info = None
+                pass  # Probably single tweet scrape, TODO: better solution
         
         if (max_items == 0):
             return None
         
         while True:
             timeline = driver.find_elements(By.CLASS_NAME, tweet_class)
-            
+
             for tweet in timeline:
                 try:
                     tweet_body = tweet.find_element(By.TAG_NAME, "div")
@@ -474,7 +480,7 @@ def main() -> None:
     profile_url = f"https://xcancel.com/{args.profile}"
     
     if args.tweet:
-        scrape_tweets(driver, tweet_url(profile_url, args.tweet), db_collections, args.force, 1, True, 0, args.attachments)
+        new_tweet = scrape_tweets(driver, tweet_url(profile_url, args.tweet), db_collections, args.force, 1, True, 0, args.attachments)
         if args.max_comments > 0:
             comments_scraped = scrape_tweets(driver, tweet_url(profile_url, args.tweet), db_collections, args.force, args.max_comments, False, 0, args.attachments, 1, tweet_url(profile_url, args.tweet))
             if comments_scraped and args.deep:
