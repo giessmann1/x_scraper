@@ -259,8 +259,8 @@ def scrape_profile_info(soup: BeautifulSoup) -> Dict[str, str]:
 def setup_driver() -> WebDriver:
     """Initialize and return a Chrome WebDriver."""
     options = uc.ChromeOptions()
-    #options.headless = True
-    return uc.Chrome(use_subprocess=True, options=options) # version_main=112
+    options.headless = True
+    return uc.Chrome(use_subprocess=True, options=options, version_main=112)
 
 
 def setup_database() -> Dict[str, Any]:
@@ -284,7 +284,7 @@ def tweet_url(profile_url: str, tweet_id: str) -> str:
 
 def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescrape: str, max_items: int, is_profile: bool, waiting_time_days: int, attachments: bool, depth: int = None, profile_tweet: str = None) -> List[str]:
     """Generic function to scrape tweets from a profile or a conversation thread."""
-    print(f"Scraping tweet {url}...") if is_profile else print(f"Scraping comments for tweet {url}...")
+    print(f"Scraping profile {url}...") if is_profile else print(f"Scraping tweet {url}...")
 
     db_key = TWEETS_DB if is_profile else COMMENTS_DB
 
@@ -310,6 +310,8 @@ def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescra
     tweet_class = "timeline-item" if is_profile else "reply"
 
     for attempt in range(MAX_ATTEMPTS):
+        if attempt > 0:  # Only show attempt message for retries
+            print(f"Attempt {attempt + 1} of {MAX_ATTEMPTS}")
 
         # Handle error pages
         try:
@@ -317,8 +319,9 @@ def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescra
             sleep(SLEEPER_MIN + SLEEP_INTERVAL())
             if "429 Too Many Requests" in driver.page_source:
                 print("Rate limit reached.")
-                print(f"Retrying attempt {attempt + 1} of {MAX_ATTEMPTS}...")
-                sleep(120 + SLEEP_INTERVAL())
+                if attempt < MAX_ATTEMPTS - 1:  # Only sleep if we're going to retry
+                    print(f"Retrying in 120 seconds...")
+                    sleep(120 + SLEEP_INTERVAL())
                 continue # Next attempt
             else:
                 error_panel = driver.find_elements(By.CLASS_NAME, "error-panel")
@@ -330,13 +333,19 @@ def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescra
                         return None
                     else:
                         print(f"Error: {error_text}")
-                        # TODO: Further analysis of error pages (e.g. account restricted)
                         return None
+                # Check for "No items found" message
+                no_items = driver.find_elements(By.XPATH, "//h2[contains(text(), 'No items found')]")
+                if no_items:
+                    print("No tweets found for this profile.")
+                    return None
                 # else continue as usual
         except Exception as e:
             # Handle other errors (e.g., network issues)
             print(f"Error: {e}")
             driver.save_screenshot("error.png")
+            if attempt < MAX_ATTEMPTS - 1:  # Only retry if we haven't hit max attempts
+                continue
             return None
 
         # Store profile info
@@ -412,20 +421,29 @@ def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescra
                     print(f"Scraped {tweet_counter} new {'tweets' if is_profile else 'comments'}.")
                     return None if len(tweets_with_replies) == 0 else tweets_with_replies
                 else:
-                    print("No pagination (load more, no more items, or icon down) found.")
+                    print("No pagination elements found.")
                     driver.save_screenshot("error.png")
-                    print(f"Retrying attempt {attempt + 1} of {MAX_ATTEMPTS}...")
-                    sleep(120 + SLEEP_INTERVAL())
-                    continue
+                    if attempt < MAX_ATTEMPTS - 1:  # Only retry if we haven't hit max attempts
+                        print(f"Retrying in 120 seconds...")
+                        sleep(120 + SLEEP_INTERVAL())
+                        break  # Break the inner while loop to retry the attempt
+                    else:
+                        print("Max attempts reached. Aborting.")
+                        return None if len(tweets_with_replies) == 0 else tweets_with_replies
             except NoSuchElementException:
-                print("No pagination (load more, no more items, or icon down) found.")
+                print("Error finding pagination elements.")
                 driver.save_screenshot("error.png")
-                print(f"Retrying attempt {attempt + 1} of {MAX_ATTEMPTS}...")
-                sleep(120 + SLEEP_INTERVAL())
-                continue
+                if attempt < MAX_ATTEMPTS - 1:  # Only retry if we haven't hit max attempts
+                    print(f"Retrying in 120 seconds...")
+                    sleep(120 + SLEEP_INTERVAL())
+                    break  # Break the inner while loop to retry the attempt
+                else:
+                    print("Max attempts reached. Aborting.")
+                    return None if len(tweets_with_replies) == 0 else tweets_with_replies
     
     print(f"Scraping failed after {MAX_ATTEMPTS} attempts.")
     driver.save_screenshot("error.png")
+    return None if len(tweets_with_replies) == 0 else tweets_with_replies
 
 
 def deep_scrape(driver: WebDriver, db_collections: Any, comments: List, force_rescrape: str, max_comments: int, attachments: bool, depth: int, profile_tweet: str) -> None:
