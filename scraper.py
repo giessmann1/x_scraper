@@ -26,7 +26,7 @@ ATTACHMENTS_DB = "attachments"
 COMMENTS_DB = "comments"
 TWEETS_DB = "tweets"
 PROFILE_DB = "profile"
-SLEEPER_MIN = 10
+SLEEPER_MIN = 5
 SLEEP_INTERVAL = lambda: random.randint(2, 4)
 MAX_DEPTH = 9999
 MAX_ATTEMPTS = 3
@@ -326,8 +326,20 @@ def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescra
             else:
                 error_panel = driver.find_elements(By.CLASS_NAME, "error-panel")
                 if error_panel:
-                    error_panel_soup = BeautifulSoup(error_panel.get_attribute("outerHTML"), "html.parser")
+                    print("Error panel found.")
+                    error_panel_soup = BeautifulSoup(error_panel[0].get_attribute("outerHTML"), "html.parser")
                     error_text = error_panel_soup.get_text()
+                    # Additional checks for suspension or not found
+                    if is_profile:
+                        username = extract_last_url_element(url)
+                        if "has been suspended" in error_text:
+                            insert_one_tweet(db_collections[PROFILE_DB], {"username_str": username, "category_str": "Suspended"})
+                            print(f"Profile {username} has been suspended.")
+                            return None
+                        elif "not found" in error_text.lower():
+                            insert_one_tweet(db_collections[PROFILE_DB], {"username_str": username, "category_str": "Not found"})
+                            print(f"Profile {username} not found.")
+                            return None
                     if error_text == "Page not found":
                         print("Page not found.")
                         return None
