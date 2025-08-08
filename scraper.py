@@ -4,12 +4,14 @@ from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 import requests
 import re
+import os
 from typing import Any, Dict, List, Optional, Union
 import argparse
 import random
 from time import sleep
 from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.chrome.webdriver import WebDriver
+from selenium.webdriver.chrome.service import Service
 from pymongo.errors import DocumentTooLarge, WriteError
 from database_wrapper import (
     mongo_authenticate,
@@ -20,7 +22,6 @@ from database_wrapper import (
     get_tweet_by_username
 )
 
-# Constants
 STATS_LEGEND = ["replies_int", "reposts_int", "quotes_int", "likes_int", "views_video_int"]
 ATTACHMENTS_DB = "attachments"
 COMMENTS_DB = "comments"
@@ -31,7 +32,6 @@ SLEEP_INTERVAL = lambda: random.randint(2, 4)
 MAX_DEPTH = 9999
 MAX_ATTEMPTS = 3
 
-# Field Names
 ID_NAME = "tweet_id_str"
 DATETIME_NAME = "datetime_utc_iso"
 LINKS_NAME = "links_list"
@@ -46,13 +46,11 @@ QUOTE_NAME = "quote"
 
 
 def us_number_to_int(string: str) -> int:
-    """Converts US-style formatted numbers to integers."""
     string_transformed = string.strip().replace(",", "")
     return 0 if string_transformed in ["GIF", ""] else int(string_transformed)
 
 
 def extract_tweet_metadata(soup: BeautifulSoup) -> Optional[Dict[str, Any]]:
-    """Extracts metadata such as stats, hashtags, mentions, and links from a tweet."""
     contents: Dict[str, Any] = {}
     stats_raw = soup.find_all("span", class_="tweet-stat")
     
@@ -79,7 +77,6 @@ def extract_tweet_metadata(soup: BeautifulSoup) -> Optional[Dict[str, Any]]:
 
 
 def extract_datetime_and_id(soup: BeautifulSoup) -> Optional[Dict[str, str]]:
-    """Extracts tweet ID and UTC datetime from a tweet."""
     datetime_raw = soup.find("span", class_="tweet-date").find("a")
     if not datetime_raw:
         return None
@@ -91,7 +88,6 @@ def extract_datetime_and_id(soup: BeautifulSoup) -> Optional[Dict[str, str]]:
 
 
 def extract_user_info(soup: BeautifulSoup, class_name: str) -> Dict[str, str]:
-    """Extracts user information (username and fullname)."""
     user_info = {}
     user_raw = soup.find("div", class_=class_name).find("a", class_="fullname")
     
@@ -103,7 +99,6 @@ def extract_user_info(soup: BeautifulSoup, class_name: str) -> Dict[str, str]:
 
 
 def extract_media(soup: BeautifulSoup) -> List[Dict[str, Union[str, bytes]]]:
-    """Extracts media (images/videos) from a tweet."""
     media_list = []
     media_raw = soup.find("div", class_="attachments")
     
@@ -120,7 +115,6 @@ def extract_media(soup: BeautifulSoup) -> List[Dict[str, Union[str, bytes]]]:
 
 
 def extract_quote(soup: BeautifulSoup, attachments_con: Any, attachments: bool) -> Optional[Dict[str, Any]]:
-    """Extracts quoted tweet information."""
     quote_raw = soup.find("div", class_="quote")
     if not quote_raw:
         return None
@@ -152,7 +146,6 @@ def extract_quote(soup: BeautifulSoup, attachments_con: Any, attachments: bool) 
 
 
 def parse_tweet(soup: BeautifulSoup, existing_entries: list, attachments_con: Any, is_profile_tweet: bool, waiting_time_days: int, attachments: bool, profile_info: dict = None) -> Optional[Union[Dict[str, Any], int]]:
-    """Tweet parsing function for both timeline and conversation tweets."""
     contents = extract_tweet_metadata(soup)
     if contents is None:
         return None
@@ -215,9 +208,7 @@ def parse_tweet(soup: BeautifulSoup, existing_entries: list, attachments_con: An
 
 
 def scrape_profile_info(soup: BeautifulSoup) -> Dict[str, str]:
-    """Scrapes profile information and stats."""
     try:
-        # Bad if those don't exist
         fullname = soup.find("a", class_="profile-card-fullname").get_text()
         username = soup.find("a", class_="profile-card-username").get_text().replace("@", "")
         joindate = soup.find("div", class_="profile-joindate").find("span")["title"]
@@ -232,7 +223,6 @@ def scrape_profile_info(soup: BeautifulSoup) -> Dict[str, str]:
         else:
             verified = False
 
-        # Optional fields
         profile_bio = soup.find("div", class_="profile-bio")
         if profile_bio:
             profile_bio = profile_bio.get_text().strip()
@@ -257,14 +247,118 @@ def scrape_profile_info(soup: BeautifulSoup) -> Dict[str, str]:
 
 
 def setup_driver() -> WebDriver:
-    """Initialize and return a Chrome WebDriver."""
     options = uc.ChromeOptions()
-    options.headless = True
-    return uc.Chrome(use_subprocess=True, options=options, version_main=112)
+    options.headless = False
+    
+    if os.environ.get('DOCKER_ENV'):
+        options.binary_location = "/usr/bin/chromium-browser"
+        driver_path = "/usr/lib/chromium/chromedriver"
+        service = Service(executable_path=driver_path)
+    else:
+        service = Service()
+        driver_path = None
+    
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--disable-extensions")
+    options.add_argument("--disable-user-data-dir")
+    options.add_argument("--disable-web-security")
+    options.add_argument("--allow-running-insecure-content")
+    options.add_argument("--disable-features=VizDisplayCompositor")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_argument("--disable-automation")
+    options.add_argument("--disable-infobars")
+    
+    if os.environ.get('DOCKER_ENV'):
+        options.add_argument("--window-size=1900,1000")
+        options.add_argument("--window-position=10,50")
+    
+    if os.environ.get('DOCKER_ENV'):
+        driver = uc.Chrome(
+            use_subprocess=False,  # Key change from uc-docker-alpine
+            options=options,
+            service=service,
+            driver_executable_path=driver_path,
+            version_main=138
+        )
+    else:
+        driver = uc.Chrome(
+            use_subprocess=True, 
+            options=options, 
+            service=service,
+            version_main=138
+        )
+    
+    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+    
+    return driver
+
+
+def create_blank_html_file(target_url: str) -> str:
+    current_dir = os.getcwd()
+    blank_file_path = os.path.join(current_dir, 'blank.html')
+    
+    with open(blank_file_path, 'w') as f:
+        f.write(f'<a href="{target_url}" target="_blank">link</a>')
+    
+    return blank_file_path
+
+
+def navigate_with_cloudflare_bypass(driver: WebDriver, target_url: str) -> None:
+    try:
+        initial_windows = driver.window_handles
+        
+        blank_file_path = create_blank_html_file(target_url)
+        
+        driver.get(f'file://{blank_file_path}')
+        
+        print(f"Waiting 10 seconds before navigating to {target_url}...")
+        sleep(10)
+        
+        links = driver.find_elements(By.XPATH, "//a[@href]")
+        if links:
+            links[0].click()
+            
+            print("Waiting 15 seconds for Cloudflare verification...")
+            sleep(15)
+            
+            new_windows = driver.window_handles
+            if len(new_windows) > len(initial_windows):
+                new_tab = [w for w in new_windows if w not in initial_windows][0]
+                driver.switch_to.window(new_tab)
+                print("Switched to new tab after Cloudflare bypass")
+                
+                for old_window in initial_windows:
+                    if old_window != new_tab:
+                        try:
+                            driver.switch_to.window(old_window)
+                            driver.close()
+                        except:
+                            pass
+                
+                driver.switch_to.window(new_tab)
+                print("Closed blank tab, staying on content tab")
+            else:
+                print("No new tab opened, using current tab")
+        else:
+            print("No links found in blank HTML file, falling back to direct navigation")
+            driver.get(target_url)
+            sleep(15)
+            
+    except Exception as e:
+        print(f"Cloudflare bypass failed, using direct navigation: {e}")
+        driver.get(target_url)
+        sleep(15)  # Still wait for potential Cloudflare check
+    finally:
+        try:
+            if 'blank_file_path' in locals():
+                os.remove(blank_file_path)
+        except:
+            pass
 
 
 def setup_database() -> Dict[str, Any]:
-    """Establishes a connection to the MongoDB database."""
     try:
         db = mongo_authenticate("./")["xdb"]
         return {
@@ -315,9 +409,22 @@ def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescra
 
         # Handle error pages
         try:
-            driver.get(url)
+            # Use Cloudflare bypass technique from uc-docker-alpine
+            navigate_with_cloudflare_bypass(driver, url)
             sleep(SLEEPER_MIN + SLEEP_INTERVAL())
-            if "429 Too Many Requests" in driver.page_source:
+            
+            # Check if stuck on verification page
+            if "Verifying your request" in driver.title:
+                print("Stuck on verification page")
+                driver.save_screenshot("verification_page.png")
+                if attempt < MAX_ATTEMPTS - 1:
+                    print(f"Retrying in 10 seconds...")
+                    sleep(10 + SLEEP_INTERVAL())
+                    continue
+                else:
+                    print("Max attempts reached. Aborting due to verification page.")
+                    return None
+            elif "429 Too Many Requests" in driver.page_source:
                 print("Rate limit reached.")
                 if attempt < MAX_ATTEMPTS - 1:  # Only sleep if we're going to retry
                     print(f"Retrying in 120 seconds...")
@@ -427,17 +534,26 @@ def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescra
                 icon_down = driver.find_elements(By.CSS_SELECTOR, "a.icon-down")
 
                 if load_more:
-                    driver.get(load_more[0].get_attribute('href'))
+                    print(f"Found 'Load more' link, clicking to load more content...")
+                    next_url = load_more[0].get_attribute('href')
+                    navigate_with_cloudflare_bypass(driver, next_url)
                     sleep(SLEEPER_MIN + SLEEP_INTERVAL())
-                elif no_more or icon_down:
+                    # After clicking load more, continue the loop to process new content
+                    continue
+                elif no_more:
+                    print(f"Scraped {tweet_counter} new {'tweets' if is_profile else 'comments'}.")
+                    return None if len(tweets_with_replies) == 0 else tweets_with_replies
+                elif icon_down:
+                    # Found icon-down - treat it like "no_more" and finish scraping this timeline
+                    print(f"Found icon-down link, finished scraping timeline.")
                     print(f"Scraped {tweet_counter} new {'tweets' if is_profile else 'comments'}.")
                     return None if len(tweets_with_replies) == 0 else tweets_with_replies
                 else:
                     print("No pagination elements found.")
                     driver.save_screenshot("error.png")
                     if attempt < MAX_ATTEMPTS - 1:  # Only retry if we haven't hit max attempts
-                        print(f"Retrying in 120 seconds...")
-                        sleep(120 + SLEEP_INTERVAL())
+                        print(f"Retrying in 10 seconds...")
+                        sleep(10 + SLEEP_INTERVAL())
                         break  # Break the inner while loop to retry the attempt
                     else:
                         print("Max attempts reached. Aborting.")
@@ -446,8 +562,8 @@ def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescra
                 print("Error finding pagination elements.")
                 driver.save_screenshot("error.png")
                 if attempt < MAX_ATTEMPTS - 1:  # Only retry if we haven't hit max attempts
-                    print(f"Retrying in 120 seconds...")
-                    sleep(120 + SLEEP_INTERVAL())
+                    print(f"Retrying in 10 seconds...")
+                    sleep(10 + SLEEP_INTERVAL())
                     break  # Break the inner while loop to retry the attempt
                 else:
                     print("Max attempts reached. Aborting.")
@@ -502,7 +618,6 @@ def parse_arguments() -> argparse.Namespace:
 
 
 def main() -> None:
-    """Main function to manage the scraping process."""
     args = parse_arguments()
     db_collections = setup_database()
     driver = setup_driver()

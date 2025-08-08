@@ -24,3 +24,12 @@ Thumbs.db
 scraper-log.txt
 error.png
 commands.sh
+
+# Debug and temporary files
+*.png
+*.log
+*.html
+debug_*
+blank.html
+verification_page.png
+error_page_source.html

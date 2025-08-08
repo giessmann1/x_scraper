@@ -1,21 +1,41 @@
 services:
-   db:
-      image: mongo:latest
-      container_name: xdbmongo
-      ports:
-         - 27017:27017
-      environment:
-         - MONGO_INITDB_DATABASE=xdb
-         - MONGO_INITDB_ROOT_USERNAME_FILE=/run/secrets/mongodb-user
-         - MONGO_INITDB_ROOT_PASSWORD_FILE=/run/secrets/mongodb-pass
-      secrets:
-         - mongodb-user
-         - mongodb-pass
-      volumes:
-         - ./init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
-         - ./xdb-data:/data/db
-secrets:
-   mongodb-user:
-      file: ./.secrets/mongodb_user.txt
-   mongodb-pass:
-      file: ./.secrets/mongodb_pwd.txt
+  db:
+    image: mongo:latest
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_DATABASE=xdb
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=admin123
+    volumes:
+      - ./init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+      - ./xdb-data:/data/db
+      - ./.secrets:/docker-entrypoint-initdb.d/.secrets:ro
+    networks:
+      - scraper-network
+
+  scraper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chrome
+    depends_on:
+      - db
+    ports:
+      - "5900:5900"  # VNC port for remote debugging
+      - "8001:8001"  # API port
+    volumes:
+      - ./.secrets:/app/.secrets:ro
+    environment:
+      - DISPLAY=:0
+      - DOCKER_ENV=true
+      - MONGO_HOST=db
+    networks:
+      - scraper-network
+    shm_size: '2g'  # Shared memory for better Chrome performance
+    restart: unless-stopped
+
+networks:
+  scraper-network:
+    driver: bridge
