@@ -8,6 +8,7 @@ import os
 from typing import Any, Dict, List, Optional, Union
 import argparse
 import random
+import time
 from time import sleep
 from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.chrome.webdriver import WebDriver
@@ -27,7 +28,7 @@ ATTACHMENTS_DB = "attachments"
 COMMENTS_DB = "comments"
 TWEETS_DB = "tweets"
 PROFILE_DB = "profile"
-SLEEPER_MIN = 5
+SLEEPER_MIN = 7
 SLEEP_INTERVAL = lambda: random.randint(1, 3)
 MAX_DEPTH = 9999
 MAX_ATTEMPTS = 3
@@ -98,23 +99,64 @@ def extract_user_info(soup: BeautifulSoup, class_name: str) -> Dict[str, str]:
     return user_info
 
 
-def extract_media(soup: BeautifulSoup) -> List[Dict[str, Union[str, bytes]]]:
+def extract_media(soup: BeautifulSoup, base_url: str = None) -> List[Dict[str, Union[str, bytes]]]:
     media_list = []
     media_raw = soup.find("div", class_="attachments")
     
     if media_raw:
         for img in media_raw.find_all("img"):
+            if "src" not in img.attrs:
+                print(f"Warning: Image element found but no src attribute: {img}")
+                continue
+                
             media_url = img["src"]
-            media_list.append({"media_url_str": media_url, "binary_data_bytes": requests.get(media_url).content})
+            # Convert relative URLs to absolute URLs
+            if media_url.startswith('/'):
+                if base_url:
+                    media_url = base_url.rstrip('/') + media_url
+                else:
+                    print(f"Warning: Relative media URL found but no base_url provided: {media_url}")
+                    continue
+            
+            try:
+                media_list.append({"media_url_str": media_url, "binary_data_bytes": requests.get(media_url).content})
+            except Exception as e:
+                print(f"Error downloading media {media_url}: {e}")
+                # Still store the URL even if download fails
+                media_list.append({"media_url_str": media_url, "binary_data_bytes": None})
 
         for video in media_raw.find_all("video"):
-            video_url = video.find("source")["src"]
-            media_list.append({"media_url_str": video_url, "binary_data_bytes": requests.get(video_url).content})
+            video_url = None
+            
+            # First try to get URL from source element
+            source_element = video.find("source")
+            if source_element and "src" in source_element.attrs:
+                video_url = source_element["src"]
+            # Fall back to data-url attribute if source element is not available
+            elif "data-url" in video.attrs:
+                video_url = video["data-url"]
+            else:
+                print(f"Warning: Video element found but no source with src attribute or data-url: {video}")
+                continue
+            # Convert relative URLs to absolute URLs
+            if video_url.startswith('/'):
+                if base_url:
+                    video_url = base_url.rstrip('/') + video_url
+                else:
+                    print(f"Warning: Relative video URL found but no base_url provided: {video_url}")
+                    continue
+            
+            try:
+                media_list.append({"media_url_str": video_url, "binary_data_bytes": requests.get(video_url).content})
+            except Exception as e:
+                print(f"Error downloading video {video_url}: {e}")
+                # Still store the URL even if download fails
+                media_list.append({"media_url_str": video_url, "binary_data_bytes": None})
     
     return media_list
 
 
-def extract_quote(soup: BeautifulSoup, attachments_con: Any, attachments: bool) -> Optional[Dict[str, Any]]:
+def extract_quote(soup: BeautifulSoup, attachments_con: Any, attachments: bool, base_url: str = None) -> Optional[Dict[str, Any]]:
     quote_raw = soup.find("div", class_="quote")
     if not quote_raw:
         return None
@@ -133,7 +175,10 @@ def extract_quote(soup: BeautifulSoup, attachments_con: Any, attachments: bool) 
     if datetime_data:
         quote_contents.update({f"{QUOTE_NAME}_{k}": v for k, v in datetime_data.items()})
 
-    media = extract_media(soup)
+    # Always initialize the media list, even if empty
+    quote_contents[f"{QUOTE_NAME}_{MEDIA_NAME}"] = []
+    
+    media = extract_media(soup, base_url)
     if media and attachments:
         quote_contents[f"{QUOTE_NAME}_{MEDIA_NAME}"] = [m["media_url_str"] for m in media]
         try:
@@ -145,7 +190,7 @@ def extract_quote(soup: BeautifulSoup, attachments_con: Any, attachments: bool) 
     return quote_contents
 
 
-def parse_tweet(soup: BeautifulSoup, existing_entries: list, attachments_con: Any, is_profile_tweet: bool, waiting_time_days: int, attachments: bool, profile_info: dict = None) -> Optional[Union[Dict[str, Any], int]]:
+def parse_tweet(soup: BeautifulSoup, existing_entries: list, attachments_con: Any, is_profile_tweet: bool, waiting_time_days: int, attachments: bool, profile_info: dict = None, base_url: str = None) -> Optional[Union[Dict[str, Any], int]]:
     contents = extract_tweet_metadata(soup)
     if contents is None:
         return None
@@ -180,15 +225,15 @@ def parse_tweet(soup: BeautifulSoup, existing_entries: list, attachments_con: An
             contents["repost_fullname_str"] = user_info["fullname_str"]
 
     
-    quote = extract_quote(soup, attachments_con, attachments)
+    quote = extract_quote(soup, attachments_con, attachments, base_url)
     if quote:
         contents.update(quote)
 
     if attachments:
-        media = extract_media(soup)
+        media = extract_media(soup, base_url)
         if media:
             media_list = [m["media_url_str"] for m in media]
-            if quote:
+            if quote and f"{QUOTE_NAME}_{MEDIA_NAME}" in quote:
                 remaining_attachments = set(media_list) - set(quote[f"{QUOTE_NAME}_{MEDIA_NAME}"])
                 if len(remaining_attachments) > 0:
                     contents[MEDIA_NAME] = remaining_attachments
@@ -249,6 +294,8 @@ def scrape_profile_info(soup: BeautifulSoup) -> Dict[str, str]:
 def setup_driver() -> WebDriver:
     options = uc.ChromeOptions()
 
+    # Add SSL certificate handling options
+    options.add_argument("--ignore-certificate-errors")
     
     if os.environ.get('DOCKER_ENV'):
         options.headless = False
@@ -291,41 +338,62 @@ def create_blank_html_file(target_url: str) -> str:
 
 
 def navigate_with_cloudflare_bypass(driver: WebDriver, target_url: str) -> None:
+    """
+    Cloudflare bypass using blank page referrer technique.
+    The blank page simulates coming from another website to bypass referrer checking.
+    """
     try:
         initial_windows = driver.window_handles
         
+        # Create and navigate to blank HTML page first
         blank_file_path = create_blank_html_file(target_url)
-        
         driver.get(f'file://{blank_file_path}')
         
-        print(f"Waiting 5 seconds before navigating to {target_url}...")
-        sleep(5)
+        print(f"Waiting 2 seconds before clicking link to {target_url}...")
+        sleep(2)
         
+        # Find and click the link to the target URL
         links = driver.find_elements(By.XPATH, "//a[@href]")
         if links:
+            print("Clicking link to navigate to target URL...")
             links[0].click()
             
-            print(f"Waiting {SLEEPER_MIN} seconds for Cloudflare verification...")
-            sleep(SLEEPER_MIN + SLEEP_INTERVAL())
+            # Wait for the new tab to open
+            print(f"Waiting for new tab to open...")
+            max_wait = 15  # Maximum seconds to wait for new tab
+            start_time = time.time()
             
-            new_windows = driver.window_handles
-            if len(new_windows) > len(initial_windows):
-                new_tab = [w for w in new_windows if w not in initial_windows][0]
-                driver.switch_to.window(new_tab)
-                print("Switched to new tab after Cloudflare bypass")
-                
-                for old_window in initial_windows:
-                    if old_window != new_tab:
+            while time.time() - start_time < max_wait:
+                new_windows = driver.window_handles
+                if len(new_windows) > len(initial_windows):
+                    # New tab opened, switch to it
+                    new_tab = [w for w in new_windows if w not in initial_windows][0]
+                    driver.switch_to.window(new_tab)
+                    print("Successfully opened new tab, closing blank tab...")
+                    
+                    # Close the blank tab
+                    for old_window in initial_windows:
                         try:
                             driver.switch_to.window(old_window)
                             driver.close()
                         except:
                             pass
+                    
+                    # Switch back to the content tab
+                    driver.switch_to.window(new_tab)
+                    print("Cloudflare bypass successful")
+                    
+                    # Wait for page to load
+                    print(f"Waiting {SLEEPER_MIN} seconds for page to load...")
+                    sleep(SLEEPER_MIN + SLEEP_INTERVAL())
+                    return
                 
-                driver.switch_to.window(new_tab)
-                print("Closed blank tab, staying on content tab")
-            else:
-                print("No new tab opened, using current tab")
+                sleep(1)  # Check every second
+            
+            # If we get here, new tab didn't open
+            print("New tab didn't open, falling back to direct navigation")
+            driver.get(target_url)
+            sleep(SLEEPER_MIN + SLEEP_INTERVAL())
         else:
             print("No links found in blank HTML file, falling back to direct navigation")
             driver.get(target_url)
@@ -361,7 +429,7 @@ def tweet_url(profile_url: str, tweet_id: str) -> str:
     return f"{profile_url}/status/{tweet_id}"
 
 
-def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescrape: str, max_items: int, is_profile: bool, waiting_time_days: int, attachments: bool, depth: int = None, profile_tweet: str = None) -> List[str]:
+def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescrape: str, max_items: int, is_profile: bool, waiting_time_days: int, attachments: bool, depth: int = None, profile_tweet: str = None, base_url: str = None) -> List[str]:
     """Generic function to scrape tweets from a profile or a conversation thread."""
     print(f"Scraping profile {url}...") if is_profile else print(f"Scraping tweet {url}...")
 
@@ -482,9 +550,9 @@ def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescra
                     tweet_body = tweet.find_element(By.TAG_NAME, "div")
                     tweet_soup = BeautifulSoup(tweet_body.get_attribute("outerHTML"), "html.parser")
                     if is_profile:
-                        tweet_data = parse_tweet(tweet_soup, existing_entries, db_collections[ATTACHMENTS_DB], is_profile, waiting_time_days, attachments, profile_info)
+                        tweet_data = parse_tweet(tweet_soup, existing_entries, db_collections[ATTACHMENTS_DB], is_profile, waiting_time_days, attachments, profile_info, base_url)
                     else:
-                        tweet_data = parse_tweet(tweet_soup, existing_entries, db_collections[ATTACHMENTS_DB], is_profile, waiting_time_days, attachments)
+                        tweet_data = parse_tweet(tweet_soup, existing_entries, db_collections[ATTACHMENTS_DB], is_profile, waiting_time_days, attachments, base_url)
 
                     if tweet_data == -1:
                         if not is_profile:
@@ -504,7 +572,7 @@ def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescra
                                 tweets_with_replies.append(tweet_data[ID_NAME])
                         else:
                             if tweet_data["replies_int"] > 0:
-                                tweets_with_replies.append(f"https://xcancel.com/{tweet_data['username_str']}/status/{tweet_data[ID_NAME]}")
+                                tweets_with_replies.append(f"{base_url}/{tweet_data['username_str']}/status/{tweet_data[ID_NAME]}")
 
                     if tweet_counter >= max_items:
                         print(f"Scraped {tweet_counter} new {'tweets' if is_profile else 'comments'}.")
@@ -559,15 +627,15 @@ def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescra
     return None if len(tweets_with_replies) == 0 else tweets_with_replies
 
 
-def deep_scrape(driver: WebDriver, db_collections: Any, comments: List, force_rescrape: str, max_comments: int, attachments: bool, depth: int, profile_tweet: str) -> None:
+def deep_scrape(driver: WebDriver, db_collections: Any, comments: List, force_rescrape: str, max_comments: int, attachments: bool, depth: int, profile_tweet: str, base_url: str) -> None:
     """Recursively scrape comments of comments up to MAX_DEPTH levels deep."""
     if depth >= MAX_DEPTH:
         return  
     
     for comment_url in comments:
-        nested_comments = scrape_tweets(driver, comment_url, db_collections, force_rescrape, max_comments, False, 0, attachments, depth, profile_tweet)
+        nested_comments = scrape_tweets(driver, comment_url, db_collections, force_rescrape, max_comments, False, 0, attachments, depth, profile_tweet, base_url)
         if nested_comments:
-            deep_scrape(driver, db_collections, nested_comments, force_rescrape, max_comments, attachments, depth + 1, profile_tweet)
+            deep_scrape(driver, db_collections, nested_comments, force_rescrape, max_comments, attachments, depth + 1, profile_tweet, base_url)
 
 
 def str_to_bool(value):
@@ -628,20 +696,20 @@ def main() -> None:
     profile_url = f"{nitter_domain}/{args.profile}"
     
     if args.tweet:
-        new_tweet = scrape_tweets(driver, tweet_url(profile_url, args.tweet), db_collections, args.force, 1, True, 0, args.attachments)
+        new_tweet = scrape_tweets(driver, tweet_url(profile_url, args.tweet), db_collections, args.force, 1, True, 0, args.attachments, base_url=nitter_domain)
         if args.max_comments > 0:
-            comments_scraped = scrape_tweets(driver, tweet_url(profile_url, args.tweet), db_collections, args.force, args.max_comments, False, 0, args.attachments, 1, tweet_url(profile_url, args.tweet))
+            comments_scraped = scrape_tweets(driver, tweet_url(profile_url, args.tweet), db_collections, args.force, args.max_comments, False, 0, args.attachments, 1, tweet_url(profile_url, args.tweet), nitter_domain)
             if comments_scraped and args.deep:
                 print("Start deep scraping...")
-                deep_scrape(driver, db_collections, comments_scraped, args.force, args.max_comments, args.attachments, 2, tweet_url(profile_url, args.tweet))
+                deep_scrape(driver, db_collections, comments_scraped, args.force, args.max_comments, args.attachments, 2, tweet_url(profile_url, args.tweet), nitter_domain)
     else:
-        new_tweets = scrape_tweets(driver, profile_url, db_collections, args.force, args.max_tweets, True, args.waiting_time, args.attachments)
+        new_tweets = scrape_tweets(driver, profile_url, db_collections, args.force, args.max_tweets, True, args.waiting_time, args.attachments, base_url=nitter_domain)
         if new_tweets and args.max_comments > 0:
             for tweet_id in new_tweets:
-                comments_scraped = scrape_tweets(driver, tweet_url(profile_url, tweet_id), db_collections, args.force, args.max_comments, False, args.waiting_time, args.attachments, 1, tweet_url(profile_url, tweet_id))
+                comments_scraped = scrape_tweets(driver, tweet_url(profile_url, tweet_id), db_collections, args.force, args.max_comments, False, args.waiting_time, args.attachments, 1, tweet_url(profile_url, tweet_id), nitter_domain)
                 if comments_scraped and args.deep:
                     print("Start deep scraping...")
-                    deep_scrape(driver, db_collections, comments_scraped, args.force, args.max_comments, args.attachments, 2, tweet_url(profile_url, tweet_id))
+                    deep_scrape(driver, db_collections, comments_scraped, args.force, args.max_comments, args.attachments, 2, tweet_url(profile_url, tweet_id), nitter_domain)
     
     print("Scraping completed.")
     driver.quit()
