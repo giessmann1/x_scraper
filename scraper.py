@@ -27,8 +27,8 @@ ATTACHMENTS_DB = "attachments"
 COMMENTS_DB = "comments"
 TWEETS_DB = "tweets"
 PROFILE_DB = "profile"
-SLEEPER_MIN = 15
-SLEEP_INTERVAL = lambda: random.randint(2, 4)
+SLEEPER_MIN = 5
+SLEEP_INTERVAL = lambda: random.randint(1, 3)
 MAX_DEPTH = 9999
 MAX_ATTEMPTS = 3
 
@@ -248,49 +248,34 @@ def scrape_profile_info(soup: BeautifulSoup) -> Dict[str, str]:
 
 def setup_driver() -> WebDriver:
     options = uc.ChromeOptions()
-    options.headless = False
+
     
     if os.environ.get('DOCKER_ENV'):
+        options.headless = False
         options.binary_location = "/usr/bin/chromium-browser"
         driver_path = "/usr/lib/chromium/chromedriver"
         service = Service(executable_path=driver_path)
-    else:
-        service = Service()
-        driver_path = None
-    
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--disable-extensions")
-    options.add_argument("--disable-user-data-dir")
-    options.add_argument("--disable-web-security")
-    options.add_argument("--allow-running-insecure-content")
-    options.add_argument("--disable-features=VizDisplayCompositor")
-    options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_argument("--disable-automation")
-    options.add_argument("--disable-infobars")
-    
-    if os.environ.get('DOCKER_ENV'):
         options.add_argument("--window-size=1900,1000")
         options.add_argument("--window-position=10,50")
-    
-    if os.environ.get('DOCKER_ENV'):
+
         driver = uc.Chrome(
-            use_subprocess=False,  # Key change from uc-docker-alpine
+            use_subprocess=False,
             options=options,
             service=service,
             driver_executable_path=driver_path,
             version_main=138
         )
     else:
+        service = Service()
+        driver_path = None
+        options.headless = False
+
         driver = uc.Chrome(
             use_subprocess=True, 
             options=options, 
             service=service,
-            version_main=138
+            version_main=112
         )
-    
-    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     
     return driver
 
@@ -313,15 +298,15 @@ def navigate_with_cloudflare_bypass(driver: WebDriver, target_url: str) -> None:
         
         driver.get(f'file://{blank_file_path}')
         
-        print(f"Waiting 10 seconds before navigating to {target_url}...")
-        sleep(10)
+        print(f"Waiting 5 seconds before navigating to {target_url}...")
+        sleep(5)
         
         links = driver.find_elements(By.XPATH, "//a[@href]")
         if links:
             links[0].click()
             
-            print("Waiting 15 seconds for Cloudflare verification...")
-            sleep(15)
+            print(f"Waiting {SLEEPER_MIN} seconds for Cloudflare verification...")
+            sleep(SLEEPER_MIN + SLEEP_INTERVAL())
             
             new_windows = driver.window_handles
             if len(new_windows) > len(initial_windows):
@@ -344,12 +329,12 @@ def navigate_with_cloudflare_bypass(driver: WebDriver, target_url: str) -> None:
         else:
             print("No links found in blank HTML file, falling back to direct navigation")
             driver.get(target_url)
-            sleep(15)
+            sleep(SLEEPER_MIN + SLEEP_INTERVAL())
             
     except Exception as e:
         print(f"Cloudflare bypass failed, using direct navigation: {e}")
         driver.get(target_url)
-        sleep(15)  # Still wait for potential Cloudflare check
+        sleep(SLEEPER_MIN + SLEEP_INTERVAL())
     finally:
         try:
             if 'blank_file_path' in locals():
@@ -418,8 +403,8 @@ def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescra
                 print("Stuck on verification page")
                 driver.save_screenshot("verification_page.png")
                 if attempt < MAX_ATTEMPTS - 1:
-                    print(f"Retrying in 10 seconds...")
-                    sleep(10 + SLEEP_INTERVAL())
+                    print(f"Retrying in {SLEEPER_MIN} seconds...")
+                    sleep(SLEEPER_MIN + SLEEP_INTERVAL())
                     continue
                 else:
                     print("Max attempts reached. Aborting due to verification page.")
@@ -552,8 +537,8 @@ def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescra
                     print("No pagination elements found.")
                     driver.save_screenshot("error.png")
                     if attempt < MAX_ATTEMPTS - 1:  # Only retry if we haven't hit max attempts
-                        print(f"Retrying in 10 seconds...")
-                        sleep(10 + SLEEP_INTERVAL())
+                        print(f"Retrying in {SLEEPER_MIN} seconds...")
+                        sleep(SLEEPER_MIN + SLEEP_INTERVAL())
                         break  # Break the inner while loop to retry the attempt
                     else:
                         print("Max attempts reached. Aborting.")
@@ -562,8 +547,8 @@ def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescra
                 print("Error finding pagination elements.")
                 driver.save_screenshot("error.png")
                 if attempt < MAX_ATTEMPTS - 1:  # Only retry if we haven't hit max attempts
-                    print(f"Retrying in 10 seconds...")
-                    sleep(10 + SLEEP_INTERVAL())
+                    print(f"Retrying in {SLEEPER_MIN} seconds...")
+                    sleep(SLEEPER_MIN + SLEEP_INTERVAL())
                     break  # Break the inner while loop to retry the attempt
                 else:
                     print("Max attempts reached. Aborting.")
@@ -617,12 +602,30 @@ def parse_arguments() -> argparse.Namespace:
     return args
 
 
+def get_nitter_domain(path: str) -> str:
+    """Read the Nitter domain from a file in the .secrets directory."""
+    try:
+        with open(f'{path}.secrets/nitter_domain.txt', 'r') as f:
+            domain = f.read().strip()
+            if not domain.startswith('http'):
+                print("Warning: nitter_domain.txt should contain full URL with protocol (http:// or https://)")
+                domain = f'https://{domain}'
+            return domain
+    except FileNotFoundError:
+        print("Warning: nitter_domain.txt not found in .secrets directory, using default https://nitter.com")
+        return "https://nitter.com"
+    except Exception as e:
+        print(f"Error reading nitter domain: {e}, using default https://nitter.com")
+        return "https://nitter.com"
+
+
 def main() -> None:
     args = parse_arguments()
     db_collections = setup_database()
     driver = setup_driver()
 
-    profile_url = f"https://xcancel.com/{args.profile}"
+    nitter_domain = get_nitter_domain("./")
+    profile_url = f"{nitter_domain}/{args.profile}"
     
     if args.tweet:
         new_tweet = scrape_tweets(driver, tweet_url(profile_url, args.tweet), db_collections, args.force, 1, True, 0, args.attachments)
