@@ -14,6 +14,8 @@ from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.chrome.webdriver import WebDriver
 from selenium.webdriver.chrome.service import Service
 from pymongo.errors import DocumentTooLarge, WriteError
+import signal
+from functools import wraps
 from database_wrapper import (
     mongo_authenticate,
     insert_one_tweet,
@@ -44,6 +46,27 @@ MENTIONS_NAME = "mentions_list"
 TWEET_ID_NAME = "ref_tweet_id_str"
 PROFILE_TWEET_ID_NAME = "profile_tweet_id_str"
 QUOTE_NAME = "quote"
+
+
+def timeout_handler(signum, frame):
+    raise TimeoutError("Tweet processing timed out after 120 seconds")
+
+def timeout_decorator(seconds):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Set the signal handler
+            old_handler = signal.signal(signal.SIGALRM, timeout_handler)
+            signal.alarm(seconds)
+            try:
+                result = func(*args, **kwargs)
+                return result
+            finally:
+                # Restore the original signal handler and cancel the alarm
+                signal.alarm(0)
+                signal.signal(signal.SIGALRM, old_handler)
+        return wrapper
+    return decorator
 
 
 def us_number_to_int(string: str) -> int:
@@ -190,7 +213,12 @@ def extract_quote(soup: BeautifulSoup, attachments_con: Any, attachments: bool, 
     return quote_contents
 
 
+@timeout_decorator(120)
 def parse_tweet(soup: BeautifulSoup, existing_entries: list, attachments_con: Any, is_profile_tweet: bool, waiting_time_days: int, attachments: bool, profile_info: dict = None, base_url: str = None) -> Optional[Union[Dict[str, Any], int]]:
+    # Test timeout mechanism - sleep for 130 seconds to trigger timeout
+    print("Testing timeout mechanism - sleeping for 130 seconds...")
+    time.sleep(130)
+    
     contents = extract_tweet_metadata(soup)
     if contents is None:
         return None
@@ -315,7 +343,7 @@ def setup_driver() -> WebDriver:
     else:
         service = Service()
         driver_path = None
-        options.headless = False
+        options.headless = True
 
         driver = uc.Chrome(
             use_subprocess=True, 
@@ -577,6 +605,9 @@ def scrape_tweets(driver: WebDriver, url: str, db_collections: Any, force_rescra
                     if tweet_counter >= max_items:
                         print(f"Scraped {tweet_counter} new {'tweets' if is_profile else 'comments'}.")
                         return tweets_with_replies  # Stop if max tweets reached
+                except TimeoutError as e:
+                    print(f"Tweet processing timed out after 120 seconds, skipping to next tweet: {e}")
+                    continue  # Continue with next tweet
                 except NoSuchElementException:
                     pass  # Ignore non-tweet elements
             
@@ -680,10 +711,10 @@ def get_nitter_domain(path: str) -> str:
                 domain = f'https://{domain}'
             return domain
     except FileNotFoundError:
-        print("Warning: nitter_domain.txt not found in .secrets directory, using default https://nitter.com")
+        print("Warning: nitter_domain.txt not found in .secrets directory, using default https://xcancel.com")
         return "https://nitter.com"
     except Exception as e:
-        print(f"Error reading nitter domain: {e}, using default https://nitter.com")
+        print(f"Error reading nitter domain: {e}, using default https://xcancel.com")
         return "https://nitter.com"
 
 
