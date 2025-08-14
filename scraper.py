@@ -215,10 +215,6 @@ def extract_quote(soup: BeautifulSoup, attachments_con: Any, attachments: bool, 
 
 @timeout_decorator(120)
 def parse_tweet(soup: BeautifulSoup, existing_entries: list, attachments_con: Any, is_profile_tweet: bool, waiting_time_days: int, attachments: bool, profile_info: dict = None, base_url: str = None) -> Optional[Union[Dict[str, Any], int]]:
-    # Test timeout mechanism - sleep for 130 seconds to trigger timeout
-    print("Testing timeout mechanism - sleeping for 130 seconds...")
-    time.sleep(130)
-    
     contents = extract_tweet_metadata(soup)
     if contents is None:
         return None
@@ -702,20 +698,28 @@ def parse_arguments() -> argparse.Namespace:
 
 
 def get_nitter_domain(path: str) -> str:
-    """Read the Nitter domain from a file in the .secrets directory."""
+    """Read multiple Nitter domains from a file in the .secrets directory and randomly select one."""
     try:
         with open(f'{path}.secrets/nitter_domain.txt', 'r') as f:
-            domain = f.read().strip()
-            if not domain.startswith('http'):
+            domains = [line.strip() for line in f.readlines() if line.strip()]
+            if not domains:
+                print("Warning: nitter_domain.txt is empty, using default https://nitter.net")
+                return "https://nitter.net"
+            
+            # Randomly select one domain
+            selected_domain = random.choice(domains)
+            print(f"Selected Nitter domain: {selected_domain}")
+            
+            if not selected_domain.startswith('http'):
                 print("Warning: nitter_domain.txt should contain full URL with protocol (http:// or https://)")
-                domain = f'https://{domain}'
-            return domain
+                selected_domain = f'https://{selected_domain}'
+            return selected_domain
     except FileNotFoundError:
-        print("Warning: nitter_domain.txt not found in .secrets directory, using default https://xcancel.com")
-        return "https://nitter.com"
+        print("Warning: nitter_domain.txt not found in .secrets directory, using default https://nitter.net")
+        return "https://nitter.net"
     except Exception as e:
-        print(f"Error reading nitter domain: {e}, using default https://xcancel.com")
-        return "https://nitter.com"
+        print(f"Error reading nitter domain: {e}, using default https://nitter.net")
+        return "https://nitter.net"
 
 
 def main() -> None:
