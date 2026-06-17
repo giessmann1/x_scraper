@@ -214,14 +214,59 @@ def parse_tweet(soup: BeautifulSoup, existing_entries: list, attachments_con: An
     return contents
 
 
+def parse_joindate(soup: BeautifulSoup) -> Optional[str]:
+    """Parses the profile join date defensively, returning an ISO string or None.
+
+    Nitter normally exposes the precise date in the span ``title`` (e.g.
+    ``"9:18 AM - 6 Mar 2012"``), but some instances/accounts render it empty or
+    in a different format. In those cases we fall back to the visible
+    ``"Joined March 2012"`` text and, failing that, return None so the rest of
+    the profile metadata is still captured.
+    """
+    joindate_div = soup.find("div", class_="profile-joindate")
+    if not joindate_div:
+        return None
+
+    # Newer markup nests the precise date in an <a title="..."> while an inner
+    # icon <span> carries an empty title, e.g.:
+    #   <a href="/ICEgov/about" title="12:20 AM - 12 May 2009">
+    #     <span class="icon-calendar" title=""></span> Joined May 2009</a>
+    # Collect every non-empty title (the div itself first, then descendants).
+    titles = []
+    if (joindate_div.get("title") or "").strip():
+        titles.append(joindate_div["title"].strip())
+    for el in joindate_div.find_all(True):
+        t = (el.get("title") or "").strip()
+        if t:
+            titles.append(t)
+
+    for raw in titles:
+        for fmt in ("%I:%M %p - %d %b %Y", "%I:%M %p - %b %d, %Y"):
+            try:
+                return datetime.strptime(raw, fmt).isoformat()
+            except ValueError:
+                continue
+
+    # Fallback: visible "Joined May 2009" text (loses day/time precision).
+    text = joindate_div.get_text().replace("Joined", "").strip()
+    for fmt in ("%B %Y", "%b %Y"):
+        try:
+            return datetime.strptime(text, fmt).isoformat()
+        except ValueError:
+            continue
+
+    if titles or text:
+        print(f"Could not parse join date (titles={titles!r}, text={text!r}).")
+    return None
+
+
 def scrape_profile_info(soup: BeautifulSoup) -> Dict[str, str]:
     """Scrapes profile information and stats."""
     try:
         # Bad if those don't exist
         fullname = soup.find("a", class_="profile-card-fullname").get_text()
         username = soup.find("a", class_="profile-card-username").get_text().replace("@", "")
-        joindate = soup.find("div", class_="profile-joindate").find("span")["title"]
-        joindate = datetime.strptime(joindate, "%I:%M %p - %d %b %Y").isoformat()
+        joindate = parse_joindate(soup)
         tweets = us_number_to_int(soup.find("li", class_="posts").find("span", class_="profile-stat-num").get_text())
         following = us_number_to_int(soup.find("li", class_="following").find("span", class_="profile-stat-num").get_text())
         followers = us_number_to_int(soup.find("li", class_="followers").find("span", class_="profile-stat-num").get_text())
